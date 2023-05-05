@@ -2,7 +2,7 @@
 
 assert()
 {
-	result="$(echo "$2" | elfmincss -)"
+	result="$(echo -e "$2" | ./build/native/minify css -)"
 	if [ "$?" != "0" ]; then
 		echo 'Crashed on:'
 		echo "$2"

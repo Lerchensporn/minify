@@ -2,24 +2,27 @@ CROSS_TRIPLE ?= native
 build_dir = build/$(CROSS_TRIPLE)
 
 .PHONY: release
-release: $(build_dir)/elfmincss
+release: $(build_dir)/minify
 
-$(build_dir)/elfmincss: elfmincss.c
+$(build_dir)/minify: minify.c
 	mkdir -p $(build_dir)
-	cc -O3 -o $(build_dir)/elfmincss elfmincss.c
-	strip $(build_dir)/elfmincss
+	cc -O3 -o $(build_dir)/minify minify.c
+	strip $(build_dir)/minify
 
 .PHONY: debug
-debug: build/debug/elfmincss
+debug: build/debug/minify
 
-build/debug/elfmincss: elfmincss.c
+build/debug/minify: minify.c
 	$(eval build_dir = build/debug)
 	mkdir -p $(build_dir)
-	cc --debug -o $(build_dir)/elfmincss elfmincss.c
+	cc --debug -o $(build_dir)/minify minify.c
 
 .PHONY: test
 test: release
-	PATH=$(build_dir) ./test.sh
+	./test-js.sh
+	./test-xml.sh
+	./test-css.sh
+	./test-html.sh
 
 .PHONY: clean
 clean:
