@@ -70,6 +70,13 @@ Some alternative minifiers choose different objectives.
    that is good to be alerted about. Strict parsing is a good practice to
    promote standard conformity.
 
+## Alternative multi-format minifier
+
+https://github.com/tdewolff/minify
+
+Written in Go. Minifies HTML, XML, SVG, JS, CSS, JSON. It is in the package
+repository of Alpine Linux and statically linked binary releases exist.
+
 ## Alternative CSS minifiers
 
 https://github.com/csstidy-c/csstidy
