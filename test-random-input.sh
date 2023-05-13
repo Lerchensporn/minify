@@ -13,4 +13,4 @@ for format in css js xml html; do
 	done
 done
 
-echo Passed the test - no crash ocurred
+echo Passed the test - no crash occurred

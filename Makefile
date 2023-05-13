@@ -6,7 +6,7 @@ release: $(build_dir)/minify
 
 $(build_dir)/minify: minify.c
 	mkdir -p $(build_dir)
-	cc -O3 -o $(build_dir)/minify minify.c
+	cc -Os -o $(build_dir)/minify minify.c
 	strip $(build_dir)/minify
 
 .PHONY: debug
