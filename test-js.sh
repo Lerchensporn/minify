@@ -16,6 +16,18 @@ assert()
 	fi
 }
 
+input="a() \n b() \n "
+expected='a();b()'
+assert "$expected" "$input"
+
+input=" ( ) =>  Math . sin ( 1 ) ; "
+expected='()=>Math.sin(1)'
+assert "$expected" "$input"
+
+input="() => {} \n () => {};"
+expected='()=>{};()=>{}'
+assert "$expected" "$input"
+
 input='a=0\n/**/\nb=0'
 expected='a=0
 b=0'
@@ -37,8 +49,8 @@ input='/  /; 3 > /  /;a & /  /'
 expected='/  /;3>/  /;a&/  /'
 assert "$expected" "$input"
 
-input='function () {}; function () {}\n if(true) {} ; a=3'
-expected='function(){};function(){};if(!0){}a=3'
+input='function a () {}; function b () {}\n if(true) {} ; a=3'
+expected='function a(){}function b(){}if(!0){}a=3'
 assert "$expected" "$input"
 
 echo 'Passed all tests'

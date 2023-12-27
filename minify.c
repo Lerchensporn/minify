@@ -510,12 +510,13 @@ char *minify_js(const char *js)
     int js_min_length = 0;
     int line = 1, last_newline = -1, i = 0;
 
-    const char *trim_around_chars = "%<>+*/-=,(){}[]!~;|&^:?";
+    const char *trim_around_chars = ".%<>+*/-=,(){}[]!~;|&^:?";
     const char *identifier_delimiters = "()[]{}; \t\r\n:=><+-*/~";
 
     enum {
         CURLY_BLOCK_UNKNOWN,
         CURLY_BLOCK_FUNCBODY,
+        CURLY_BLOCK_ARROWFUNCBODY,
     } curly_block[256];
     int curly_nesting_level = 0;
 
@@ -538,7 +539,7 @@ char *minify_js(const char *js)
             // cannot be used as constructors: `new arrow_function()` where `arrow_function` is an
             // arrow function is invalid.
 
-            // Here we consume the input until ( of the parameter list.
+            // Here we consume the input until `(` of the parameter list.
 
             strcpy(&js_min[js_min_length], "function");
             js_min_length += sizeof "function" - 1;
@@ -559,7 +560,7 @@ char *minify_js(const char *js)
             }
             if (++round_nesting_level == sizeof round_block / sizeof round_block[0]) {
                 free(js_min);
-                fprintf(stderr, "The nesting level of round brackets is too deep");
+                fprintf(stderr, "The nesting level of round brackets is too deep\n");
                 return NULL;
             }
             round_block[round_nesting_level] = ROUND_BLOCK_FUNCDEF_PARAMS;
@@ -570,16 +571,17 @@ char *minify_js(const char *js)
         if (js[i] == '{') {
             if (++curly_nesting_level == sizeof curly_block / sizeof curly_block[0]) {
                 free(js_min);
-                fprintf(stderr, "The nesting level of curly brackets is too deep");
+                fprintf(stderr, "The nesting level of curly brackets is too deep\n");
                 return NULL;
             }
-            if (
-                js_min_length > 2 && (
-                    js_min[js_min_length - 2] == '=' && js_min[js_min_length - 1] == '>' ||
-                    js_min[js_min_length - 1] == ')' &&
-                    round_block[round_nesting_level + 1] == ROUND_BLOCK_FUNCDEF_PARAMS
-                )
-            ) {
+            if (js_min_length >= 2 &&
+                js_min[js_min_length - 2] == '=' && js_min[js_min_length - 1] == '>')
+            {
+                curly_block[curly_nesting_level] = CURLY_BLOCK_ARROWFUNCBODY;
+            }
+            else if (js_min_length >= 1 && js_min[js_min_length - 1] == ')' &&
+                     round_block[round_nesting_level + 1] == ROUND_BLOCK_FUNCDEF_PARAMS)
+            {
                 curly_block[curly_nesting_level] = CURLY_BLOCK_FUNCBODY;
             }
             else {
@@ -592,7 +594,7 @@ char *minify_js(const char *js)
         if (js[i] == '(') {
             if (++round_nesting_level == sizeof round_block / sizeof round_block[0]) {
                 free(js_min);
-                fprintf(stderr, "The nesting level of round brackets is too deep");
+                fprintf(stderr, "The nesting level of round brackets is too deep\n");
                 return NULL;
             }
 
@@ -655,12 +657,12 @@ char *minify_js(const char *js)
                 i = js_skip_whitespaces_comments(js, i + 1, &line, &last_newline);
             } while (js[i] == ';');
 
-            // `;` can be removed after `}`, except if it ends a function body.
+            // `;` can be removed after `}`, except if it ends an arrow function body.
             // Semicolon cannot be removed in `a=()=>{};b=0`.
 
             if (
                 (before_semicolon != '}' ||
-                curly_block[curly_nesting_level + 1] == CURLY_BLOCK_FUNCBODY) &&
+                curly_block[curly_nesting_level + 1] == CURLY_BLOCK_ARROWFUNCBODY) &&
                 js[i] != '}' && js[i] != '\0'
             ) {
                 js_min[js_min_length++] = ';';
@@ -723,14 +725,23 @@ char *minify_js(const char *js)
         {
             int old_line = line;
             i = js_skip_whitespaces_comments(js, i, &line, &last_newline);
+            if (js_min_length == 0) {
+                continue;
+            }
             if (old_line != line && js_min[js_min_length - 1] == '}' &&
-                curly_block[curly_nesting_level + 1] == CURLY_BLOCK_FUNCBODY &&
+                curly_block[curly_nesting_level + 1] == CURLY_BLOCK_ARROWFUNCBODY &&
                 js[i] != '\0' && js[i] != '}')
             {
                 js_min[js_min_length++] = ';';
                 continue;
             }
-            if (i == 0 || strchr(trim_around_chars, js_min[js_min_length - 1]) != NULL) {
+            if (old_line != line && js_min[js_min_length - 1] == ')' &&
+                js[i] != '\0' && js[i] != '}')
+            {
+                js_min[js_min_length++] = ';';
+                continue;
+            }
+            if (strchr(trim_around_chars, js_min[js_min_length - 1]) != NULL) {
                 continue;
             }
             if (strchr(trim_around_chars, js[i]) == NULL) {
