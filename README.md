@@ -1,4 +1,4 @@
-This is a minifier for CSS, JavaScript, XML and HTML, written in C. It is
+This is a minifier for CSS, JavaScript, XML, HTML and JSON, written in C. It is
 designed according to the following requirements:
 
 - Released as single binary with no dependencies except libc.

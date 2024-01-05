@@ -104,16 +104,16 @@ static bool is_nestable_atrule(const char *atrule, unsigned int atrule_length)
 {
     return
         sizeof "@media" - 1 == atrule_length &&
-        ! strnicmp(atrule, "@media", atrule_length) ||
+        !strnicmp(atrule, "@media", atrule_length) ||
 
         sizeof "@layer " - 1 == atrule_length &&
-        ! strnicmp(atrule, "@layer", atrule_length) ||
+        !strnicmp(atrule, "@layer", atrule_length) ||
 
         sizeof "@container" - 1 == atrule_length &&
-        ! strnicmp(atrule, "@container", atrule_length) ||
+        !strnicmp(atrule, "@container", atrule_length) ||
 
         sizeof "@keyframes" - 1 == atrule_length &&
-        ! strnicmp(atrule, "@keyframes", atrule_length);
+        !strnicmp(atrule, "@keyframes", atrule_length);
 }
 
 char *minify_css(const char *css)
@@ -212,6 +212,7 @@ char *minify_css(const char *css)
             }
             css_min[css_min_length++] = '(';
             if (css[i] == '"' || css[i] == '\'') {
+                // TODO: active_backslash
                 char quot = css[i];
                 do {
                     css_min[css_min_length++] = css[i];
@@ -231,7 +232,7 @@ char *minify_css(const char *css)
             }
             else {
                 while ((css[i] != ')' || css[i - 1] == '\\') && css[i] != '\0' &&
-                    ! is_whitespace(css[i]))
+                    !is_whitespace(css[i]))
                 {
                     css_min[css_min_length++] = css[i];
                     i += 1;
@@ -256,6 +257,7 @@ char *minify_css(const char *css)
             continue;
         }
         if (css[i] == '"' || css[i] == '\'') {
+            // TODO: active_backslash
             int k = i;
             css_min[css_min_length++] = css[i++];
             while ((css[i] != css[k] || css[i - 1] == '\\') && css[i] != '\0') {
@@ -474,7 +476,7 @@ static int js_skip_whitespaces_comments(const char *js, int i, int *line, int *l
         if (js[i] == '\0') {
             break;
         }
-        else if (js[i] == '/' && js[i + 1] == '*') {
+        else if (js[i] == '/' && js[i + 1] == '*' && js[i + 2] != '!') {
             i += 2;
             while (js[i] != '\0' && (js[i] != '*' || js[i + 1] != '/')) {
                 if (js[i] == '\n') {
@@ -510,20 +512,20 @@ char *minify_js(const char *js)
     int js_min_length = 0;
     int line = 1, last_newline = -1, i = 0;
 
-    const char *trim_around_chars = ".%<>+*/-=,(){}[]!~;|&^:?";
-    const char *identifier_delimiters = "()[]{}; \t\r\n:=><+-*/~";
+    const char *identifier_delimiters = ".%<>+*/-=,(){}[]!~;|&^:? \t\r\n";
 
     enum {
         CURLY_BLOCK_UNKNOWN,
         CURLY_BLOCK_FUNCBODY,
         CURLY_BLOCK_ARROWFUNCBODY,
-    } curly_block[256];
+    } curly_block[64];
     int curly_nesting_level = 0;
 
     enum {
         ROUND_BLOCK_UNKNOWN,
+        ROUND_BLOCK_CONDITION,
         ROUND_BLOCK_FUNCDEF_PARAMS,
-    } round_block[256];
+    } round_block[64];
     int round_nesting_level = 0;
 
     while (true) {
@@ -531,9 +533,11 @@ char *minify_js(const char *js)
             js_min[js_min_length++] = '\0';
             break;
         }
+        /*
         if (
-            ! strncmp(&js[i], "function", sizeof "function" - 1) &&
-            strchr(identifier_delimiters, js[i + sizeof "function" - 1]) != NULL
+            !strncmp(&js[i], "function", sizeof "function" - 1) &&
+            strchr(identifier_delimiters, js[i + sizeof "function" - 1]) != NULL &&
+            (i == 0 || strchr(identifier_delimiters, js[i - 1]) != NULL)
         ) {
             // Regular functions cannot be safely replaced by arrow functions.  Arrow functions
             // cannot be used as constructors: `new arrow_function()` where `arrow_function` is an
@@ -546,6 +550,16 @@ char *minify_js(const char *js)
 
             i += sizeof "function" - 1;
             i = js_skip_whitespaces_comments(js, i, &line, &last_newline);
+
+            if (js[i] == ':') {
+                // `function` is a valid object key
+                continue;
+            }
+
+            if (js[i] == '*') {
+                js_min[js_min_length++] = '*';
+                i = js_skip_whitespaces_comments(js, i + 1, &line, &last_newline);
+            }
             if (js[i] != '(') {
                 js_min[js_min_length++] = ' ';
                 while (strchr(identifier_delimiters, js[i]) == NULL) {
@@ -554,6 +568,7 @@ char *minify_js(const char *js)
             }
             i = js_skip_whitespaces_comments(js, i, &line, &last_newline);
             if (js[i] != '(') {
+                printf("%.*s\n", 100, &js[i]);
                 fprintf(stderr, "Expected ( in line %d, column %d\n", line, i - last_newline);
                 free(js_min);
                 return NULL;
@@ -568,7 +583,22 @@ char *minify_js(const char *js)
             i += 1;
             continue;
         }
+        */
         if (js[i] == '{') {
+            i += 1;
+            if (js_min_length > 0 && js_min[js_min_length - 1] == ')' &&
+                round_block[round_nesting_level + 1] == ROUND_BLOCK_CONDITION)
+            {
+                // Replacing `if(1){}` by `if(1);`
+                i = js_skip_whitespaces_comments(js, i, &line, &last_newline);
+                if (js[i] == '}') {
+                    js_min[js_min_length++] = ';';
+                    do {
+                        i = js_skip_whitespaces_comments(js, i + 1, &line, &last_newline);
+                    } while (js[i] == ';');
+                    continue;
+                }
+            }
             if (++curly_nesting_level == sizeof curly_block / sizeof curly_block[0]) {
                 free(js_min);
                 fprintf(stderr, "The nesting level of curly brackets is too deep\n");
@@ -588,7 +618,6 @@ char *minify_js(const char *js)
                 curly_block[curly_nesting_level] = CURLY_BLOCK_UNKNOWN;
             }
             js_min[js_min_length++] = '{';
-            i += 1;
             continue;
         }
         if (js[i] == '(') {
@@ -600,6 +629,34 @@ char *minify_js(const char *js)
 
             i += 1;
 
+            bool preceded_by_if_for_while =
+                js_min_length >= 2 &&
+                !strncmp(&js_min[js_min_length - 2], "if", 2) &&
+                (
+                    js_min_length == 2 ||
+                    strchr(identifier_delimiters, js_min[js_min_length - 3]) != NULL
+                );
+            preceded_by_if_for_while |=
+                js_min_length >= 3 &&
+                !strncmp(&js_min[js_min_length - 3], "for", 3) &&
+                (
+                    js_min_length == 3 ||
+                    strchr(identifier_delimiters, js_min[js_min_length - 4]) != NULL
+                );
+            preceded_by_if_for_while |=
+                js_min_length >= 5 &&
+                !strncmp(&js_min[js_min_length - 5], "while", 5) &&
+                (
+                    js_min_length == 5 ||
+                    strchr(identifier_delimiters, js_min[js_min_length - 6]) != NULL
+                );
+
+            if (preceded_by_if_for_while) {
+                round_block[round_nesting_level] = ROUND_BLOCK_CONDITION;
+                js_min[js_min_length++] = '(';
+                continue;
+            }
+
             // Removing round brackets around single parameters with no default
             // value of arrow functions.
 
@@ -608,12 +665,12 @@ char *minify_js(const char *js)
             int k = i;
             k = js_skip_whitespaces_comments(js, k, &line, &last_newline);
             int arg_start = k;
-            do {
+            while (strchr(identifier_delimiters, js[k]) == NULL) {
                 k += 1;
-            } while (strchr(",)= \n\r\t/*", js[k]) == NULL);
+            }
             int arg_end = k;
             k = js_skip_whitespaces_comments(js, k, &line, &last_newline);
-            if (js[k] == ')') {
+            if (k > arg_start && js[k] == ')') {
                 k = js_skip_whitespaces_comments(js, k + 1, &line, &last_newline);
                 if (js[k] == '=' && js[k + 1] == '>') {
                     remove_round_brackets_around_param = true;
@@ -624,6 +681,7 @@ char *minify_js(const char *js)
                 strncpy(&js_min[js_min_length], &js[arg_start], arg_end - arg_start);
                 js_min_length += arg_end - arg_start;
                 i = k;
+                round_nesting_level -= 1;
             }
             else {
                 round_block[round_nesting_level] = ROUND_BLOCK_UNKNOWN;
@@ -634,6 +692,7 @@ char *minify_js(const char *js)
         if (js[i] == '}') {
             if (--curly_nesting_level < 0) {
                 free(js_min);
+                printf("%.*s\n", 100, &js[i]);
                 fprintf(stderr, "Unexpected } in line %d, column %d\n", line, i - last_newline);
                 return NULL;
             }
@@ -652,32 +711,56 @@ char *minify_js(const char *js)
             continue;
         }
         if (js[i] == ';') {
+            if (round_nesting_level > 0 && round_block[round_nesting_level] == ROUND_BLOCK_CONDITION) {
+                // Do not remove `;` in `for(;;i++){…}`
+                js_min[js_min_length++] = ';';
+                i += 1;
+                continue;
+            }
             char before_semicolon = (js_min_length == 0 ? '}' : js_min[js_min_length - 1]);
             do {
                 i = js_skip_whitespaces_comments(js, i + 1, &line, &last_newline);
             } while (js[i] == ';');
 
-            // `;` can be removed after `}`, except if it ends an arrow function body.
-            // Semicolon cannot be removed in `a=()=>{};b=0`.
+            // `;` can be removed before `}` and at the end of the document except
+            // when it follows the `)` of a condition.
 
             if (
-                (before_semicolon != '}' ||
-                curly_block[curly_nesting_level + 1] == CURLY_BLOCK_ARROWFUNCBODY) &&
-                js[i] != '}' && js[i] != '\0'
+                (js[i] == '\0' || js[i] == '}') &&
+                !(
+                    before_semicolon == ')' &&
+                    round_block[round_nesting_level + 1] == ROUND_BLOCK_CONDITION
+                )
             ) {
-                js_min[js_min_length++] = ';';
+                continue;
             }
+
+            js_min[js_min_length++] = ';';
             continue;
         }
         if (js[i] == '/' && js[i + 1] != '/' && js[i + 1] != '*' &&
-            (js_min_length == 0 || strchr("^!&|([><+-*i%", js_min[js_min_length - 1]) != NULL))
+            (js_min_length == 0 || strchr("^!&|([><+-*%:?~{,;=", js_min[js_min_length - 1]) != NULL))
         {
             // This is a regex object.
 
             js_min[js_min_length++] = '/';
             i += 1;
-            while (js[i] != '\0' && (js[i] != '/' || js[i - 1] == '\\')) {
+            bool active_backslash = false;
+            bool in_angular_brackets = false;
+            while (js[i] != '\0' && (js[i] != '/' || active_backslash || in_angular_brackets)) {
                 js_min[js_min_length++] = js[i];
+                if (js[i] == '\\') {
+                    active_backslash = !active_backslash;
+                }
+                else {
+                    active_backslash = false;
+                }
+                if (js[i] == '[' && !active_backslash) {
+                    in_angular_brackets = true;
+                }
+                if (js[i] == ']' && !active_backslash) {
+                    in_angular_brackets = false;
+                }
                 i += 1;
             }
             js_min[js_min_length++] = '/';
@@ -688,8 +771,15 @@ char *minify_js(const char *js)
             char quot = js[i];
             i += 1;
             js_min[js_min_length++] = quot;
-            while (js[i] != '\0' && (js[i] != quot || js[i - 1] == '\\')) {
+            bool active_backslash = false;
+            while (js[i] != '\0' && (js[i] != quot || active_backslash)) {
                 js_min[js_min_length++] = js[i];
+                if (js[i] == '\\') {
+                    active_backslash = !active_backslash;
+                }
+                else {
+                    active_backslash = false;
+                }
                 i += 1;
             }
             if (js[i] != quot) {
@@ -702,21 +792,56 @@ char *minify_js(const char *js)
             continue;
         }
         if ((i == 0 || strchr(identifier_delimiters, js[i - 1]) != NULL) &&
-            ! strncmp(&js[i], "true", sizeof "true" - 1) &&
+            !strncmp(&js[i], "true", sizeof "true" - 1) &&
             strchr(identifier_delimiters, js[i + sizeof "true" - 1]) != NULL)
         {
-            js_min[js_min_length++] = '!';
-            js_min[js_min_length++] = '0';
-            i += sizeof "true" - 1;
+            i = js_skip_whitespaces_comments(js, i + sizeof "true" - 1, &line, &last_newline);
+            if (js[i] == ':') {
+                strcpy(&js_min[js_min_length], "true");
+                js_min_length += sizeof "true" - 1;
+            }
+            else {
+                if (js_min_length > 0 && js_min[js_min_length - 1] == ' ') {
+                    js_min_length -= 1;
+                }
+                js_min[js_min_length++] = '!';
+                js_min[js_min_length++] = '0';
+            }
             continue;
         }
         if ((i == 0 || strchr(identifier_delimiters, js[i - 1]) != NULL) &&
-            ! strncmp(&js[i], "false", sizeof "false" - 1) &&
+            !strncmp(&js[i], "false", sizeof "false" - 1) &&
             strchr(identifier_delimiters, js[i + sizeof "false" - 1]) != NULL)
         {
-            js_min[js_min_length++] = '!';
-            js_min[js_min_length++] = '1';
-            i += sizeof "false" - 1;
+            i = js_skip_whitespaces_comments(js, i + sizeof "false" - 1, &line, &last_newline);
+            if (js[i] == ':') {
+                strcpy(&js_min[js_min_length], "false");
+                js_min_length += sizeof "false" - 1;
+            }
+            else {
+                if (js_min_length > 0 && js_min[js_min_length - 1] == ' ') {
+                    js_min_length -= 1;
+                }
+                js_min[js_min_length++] = '!';
+                js_min[js_min_length++] = '1';
+            }
+            continue;
+        }
+        if (js[i] == '/' && js[i + 1] == '*' && js[i + 2] == '!') {
+            int comment_start = i;
+            i += 3;
+            while (js[i] != '\0' && (js[i] != '*' || js[i + 1] != '/')) {
+                if (js[i] == '\n') {
+                    line += 1;
+                    last_newline = i;
+                }
+                i += 1;
+            }
+            if (js[i] != '\0') {
+                i += 2;
+            }
+            strncpy(&js_min[js_min_length], &js[comment_start], i - comment_start);
+            js_min_length += i - comment_start;
             continue;
         }
         if (is_whitespace(js[i]) ||
@@ -728,29 +853,59 @@ char *minify_js(const char *js)
             if (js_min_length == 0) {
                 continue;
             }
-            if (old_line != line && js_min[js_min_length - 1] == '}' &&
-                curly_block[curly_nesting_level + 1] == CURLY_BLOCK_ARROWFUNCBODY &&
-                js[i] != '\0' && js[i] != '}')
+            if (js[i] == '}' || js[i] == '\0') {
+                continue;
+            }
+
+            // Replacing newlines between keywords and identifiers by `;` or ` ` would be quite
+            // difficult and just cosmetic, therefore we preserve these newlines. How to replace
+            // depends not only on the keyword but also on its context. For example, `await` is
+            // only a keyword in async functions, `get` and `set` are keywords only in object
+            // definition blocks, and `async` and access modifiers can be used as variables inside
+            // function blocks. Additionally we would need to consider backward and forward
+            // compatibility with different JavaScript versions and with TypeScript.
+
+            if (js[i] == '+' && js_min[js_min_length - 1] == '+' ||
+                js[i] == '-' && js_min[js_min_length - 1] == '-')
             {
-                js_min[js_min_length++] = ';';
+                js_min[js_min_length++] = ' ';
                 continue;
             }
-            if (old_line != line && js_min[js_min_length - 1] == ')' &&
-                js[i] != '\0' && js[i] != '}')
+            if (js_min[js_min_length - 1] == ')' &&
+                round_block[round_nesting_level + 1] == ROUND_BLOCK_CONDITION)
             {
-                js_min[js_min_length++] = ';';
                 continue;
             }
-            if (strchr(trim_around_chars, js_min[js_min_length - 1]) != NULL) {
-                continue;
+            if (old_line != line) {
+                const char trim_newline_after[] = "([{;=*-+^!~?:,><-+'\"/`|&";
+                if (strchr(trim_newline_after, js_min[js_min_length - 1]) != NULL) {
+                    continue;
+                }
+                js_min[js_min_length++] = '\n';
             }
-            if (strchr(trim_around_chars, js[i]) == NULL) {
-                js_min[js_min_length++] = (old_line != line ? '\n' : ' ');
+            else {
+                const char trim_space_around[] = "()[]{},=*;?!:><-+'\"/|&`";
+                if (strchr(trim_space_around, js[i]) != NULL ||
+                    strchr(trim_space_around, js_min[js_min_length - 1]) != NULL)
+                {
+                    continue;
+                }
+                js_min[js_min_length++] = ' ';
             }
             continue;
         }
         js_min[js_min_length++] = js[i];
         i += 1;
+    }
+    if (round_nesting_level != 0) {
+        free(js_min);
+        fprintf(stderr, "There are unclosed round bracket blocks\n");
+        return NULL;
+    }
+    if (curly_nesting_level != 0) {
+        free(js_min);
+        fprintf(stderr, "There are unclosed curly bracket\n");
+        return NULL;
     }
     char *js_min_realloc = realloc(js_min, js_min_length);
     if (js_min_realloc == NULL) {
@@ -810,7 +965,7 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
             sgml_min[sgml_min_length++] = '\0';
             break;
         }
-        if (! strncmp(&sgml[i], "<!--", 4)) {
+        if (!strncmp(&sgml[i], "<!--", 4)) {
             i += 4;
             while (sgml[i] != '\0' && strncmp(&sgml[i], "-->", 3)) {
                 if (sgml[i] == '\n') {
@@ -860,7 +1015,7 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
             whitespace_before_tag =
                 sgml_min_length > 0 && is_whitespace(sgml_min[sgml_min_length - 1]);
             i += 1;
-            if (! strnicmp(&sgml[i], "!DOCTYPE", sizeof "!DOCTYPE" - 1)) {
+            if (!strnicmp(&sgml[i], "!DOCTYPE", sizeof "!DOCTYPE" - 1)) {
                 syntax_block = SYNTAX_BLOCK_DOCTYPE;
                 sgml_min[sgml_min_length++] = '<';
                 continue;
@@ -871,7 +1026,7 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
             current_tag_length = 0;
             while (sgml[i + current_tag_length] != '>' &&
                    sgml[i + current_tag_length] != '\0' &&
-                   ! is_whitespace(sgml[i + current_tag_length]))
+                   !is_whitespace(sgml[i + current_tag_length]))
             {
                 current_tag_length += 1;
             }
@@ -895,7 +1050,7 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
             else if (sgml_subset == SGML_SUBSET_XML &&
                      syntax_block != SYNTAX_BLOCK_DOCTYPE &&
                      sgml[i + 1] == '<' && sgml[i + 2] == '/' &&
-                     ! strncmp(current_tag, &sgml[i + 3], current_tag_length) &&
+                     !strncmp(current_tag, &sgml[i + 3], current_tag_length) &&
                      (is_whitespace(sgml[i + 3 + current_tag_length]) ||
                      sgml[i + 3 + current_tag_length] == '>'))
             {
@@ -1015,7 +1170,7 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
         }
         if (sgml_subset == SGML_SUBSET_HTML && syntax_block == SYNTAX_BLOCK_CONTENT &&
             current_tag_length == sizeof "script" - 1 &&
-            ! strnicmp(current_tag, "script", sizeof "script" - 1))
+            !strnicmp(current_tag, "script", sizeof "script" - 1))
         {
             // The difference between `script` and `pre` tags is that XML comments
             // must not be removed from the content of script tags.
@@ -1030,7 +1185,7 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
             syntax_block == SYNTAX_BLOCK_CONTENT && is_whitespace(sgml[i]))
         {
             if (current_tag_length == sizeof "pre" - 1 &&
-                ! strnicmp(current_tag, "pre", sizeof "pre" - 1))
+                !strnicmp(current_tag, "pre", sizeof "pre" - 1))
             {
                 if (sgml[i] == '\n') {
                     line += 1;
@@ -1066,7 +1221,7 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
                 }
                 i += 3;
             } while (true);
-            if (! whitespace_before_tag && sgml[i] != '\0') {
+            if (!whitespace_before_tag && sgml[i] != '\0') {
                 sgml_min[sgml_min_length++] = ' ';
             }
             continue;
@@ -1093,9 +1248,60 @@ char *minify_html(const char *html)
     return minify_sgml(html, SGML_SUBSET_HTML);
 }
 
-void print_usage()
+char *minify_json(const char *json)
 {
-    fputs("Usage: minify <css|js|xml|html> <input file|-> [--benchmark]\n", stderr);
+    char *json_min = malloc(strlen(json) + 1);
+    if (json_min == NULL) {
+        perror(NULL);
+        return NULL;
+    }
+    int json_min_length = 0;
+    int i = 0;
+    while (true) {
+        if (json[i] == '\0') {
+            break;
+        }
+        while (is_whitespace(json[i])) {
+            i += 1;
+        }
+        if (json[i] == '"') {
+            i += 1;
+            json_min[json_min_length++] = '"';
+            bool active_backslash = false;
+            while (json[i] != '\0' && (json[i] != '"' || active_backslash)) {
+                if (json[i] == '\\') {
+                    active_backslash = !active_backslash;
+                }
+                else {
+                    active_backslash = false;
+                }
+                json_min[json_min_length++] = json[i];
+                i += 1;
+            }
+            if (json[i] == '\0') {
+                free(json_min);
+                fprintf(stderr, "Unclosed JSON string\n");
+                return NULL;
+            }
+            json_min[json_min_length++] = '"';
+            i += 1;
+            continue;
+        }
+        json_min[json_min_length++] = json[i];
+        i += 1;
+    }
+    char *json_min_realloc = realloc(json_min, json_min_length);
+    if (json_min_realloc == NULL) {
+        free(json_min);
+        perror(NULL);
+        return NULL;
+    }
+    return json_min;
+}
+
+static void print_usage()
+{
+    fputs("Usage: minify <css|js|xml|html|json> <input file|-> [--benchmark]\n", stderr);
 }
 
 int main(int argc, char *argv[])
@@ -1104,7 +1310,7 @@ int main(int argc, char *argv[])
     const char *format_str = NULL;
     const char *input_filename = NULL;
     for (int i = 1; i < argc; ++i) {
-        if (! strcmp(argv[i], "--benchmark")) {
+        if (!strcmp(argv[i], "--benchmark")) {
             benchmark = true;
         }
         else if (format_str == NULL) {
@@ -1127,18 +1333,22 @@ int main(int argc, char *argv[])
         FORMAT_CSS,
         FORMAT_XML,
         FORMAT_HTML,
+        FORMAT_JSON,
     } format;
-    if (! strcmp(format_str, "js")) {
+    if (!strcmp(format_str, "js")) {
         format = FORMAT_JS;
     }
-    else if (! strcmp(format_str, "css")) {
+    else if (!strcmp(format_str, "css")) {
         format = FORMAT_CSS;
     }
-    else if (! strcmp(format_str, "xml")) {
+    else if (!strcmp(format_str, "xml")) {
         format = FORMAT_XML;
     }
-    else if (! strcmp(format_str, "html")) {
+    else if (!strcmp(format_str, "html")) {
         format = FORMAT_HTML;
+    }
+    else if (!strcmp(format_str, "json")) {
+        format = FORMAT_JSON;
     }
     else {
         fprintf(stderr, "Unsupported input format: %s\n", format_str);
@@ -1164,6 +1374,9 @@ int main(int argc, char *argv[])
         break;
     case FORMAT_HTML:
         input_min = minify_html(input);
+        break;
+    case FORMAT_JSON:
+        input_min = minify_json(input);
         break;
     default:
         input_min = NULL;

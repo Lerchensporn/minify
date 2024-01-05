@@ -16,15 +16,63 @@ assert()
 	fi
 }
 
-input="a() \n b() \n "
+input='/*! do not remove */'
+expected='/*! do not remove */'
+assert "$expected" "$input"
+
+input='for (let i = 1; ; ++i);'
+expected='for(let i=1;;++i);'
+assert "$expected" "$input"
+
+input='while(1);'
+expected='while(1);'
+assert "$expected" "$input"
+
+input='for(1);'
+expected='for(1);'
+assert "$expected" "$input"
+
+input='if(1);'
+expected='if(1);'
+assert "$expected" "$input"
+
+input='let obj = {true: true, false: false}'
+expected='let obj={true:!0,false:!1}'
+assert "$expected" "$input"
+
+input='+ +i;i+ +1'
+expected='+ +i;i+ +1'
+assert "$expected" "$input"
+
+input='let a=function(){};let b=3'
+expected='let a=function(){};let b=3'
+assert "$expected" "$input"
+
+input='(arg) => {} ; () => {} ;  do(() => {})'
+expected='arg=>{};()=>{};do(()=>{})'
+assert "$expected" "$input"
+
+input='for(;; i++){};/**/;;'
+expected='for(;;i++);'
+assert "$expected" "$input"
+
+input='if ( 1 ) { /**/ } else  if (1);  else  return ; '
+expected='if(1);else if(1);else return'
+assert "$expected" "$input"
+
+input='function\n(\n)\n{\n}\n'
+expected='function(){}'
+assert "$expected" "$input"
+
+input='a()\nb() \n '
 expected='a();b()'
 assert "$expected" "$input"
 
-input=" ( ) =>  Math . sin ( 1 ) ; "
+input='\n (\n )\n =>\n  Math\n .\n sin\n (\n 1\n )\n ;\n '
 expected='()=>Math.sin(1)'
 assert "$expected" "$input"
 
-input="() => {} \n () => {};"
+input='() => {} \n () => {};'
 expected='()=>{};()=>{}'
 assert "$expected" "$input"
 
@@ -50,7 +98,7 @@ expected='/  /;3>/  /;a&/  /'
 assert "$expected" "$input"
 
 input='function a () {}; function b () {}\n if(true) {} ; a=3'
-expected='function a(){}function b(){}if(!0){}a=3'
+expected='function a(){}function b(){}if(!0);a=3'
 assert "$expected" "$input"
 
 echo 'Passed all tests'
