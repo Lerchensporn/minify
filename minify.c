@@ -769,8 +769,9 @@ char *minify_js(const char *js)
         }
         if (js[i] == '`' || js[i] == '"' || js[i] == '\'') {
             char quot = js[i];
-            i += 1;
             js_min[js_min_length++] = quot;
+        merge_quote:
+            i += 1;
             bool active_backslash = false;
             while (js[i] != '\0' && (js[i] != quot || active_backslash)) {
                 js_min[js_min_length++] = js[i];
@@ -787,8 +788,31 @@ char *minify_js(const char *js)
                 fprintf(stderr, "Unexpected end of document, expected %c\n", quot);
                 return NULL;
             }
+            int k = js_skip_whitespaces_comments(js, i + 1, &line, &last_newline);
+            if (js[k] == '+') {
+                k = js_skip_whitespaces_comments(js, k + 1, &line, &last_newline);
+                if (js[k] == quot) {
+                    i = k;
+                    goto merge_quote;
+                }
+            }
             js_min[js_min_length++] = quot;
             i += 1;
+            continue;
+        }
+        if ((i == 0 || strchr(identifier_delimiters, js[i - 1]) != NULL) &&
+            !strncmp(&js[i], "undefined", sizeof "undefined" - 1) &&
+            strchr(identifier_delimiters, js[i + sizeof "undefined" - 1]) != NULL)
+        {
+            i = js_skip_whitespaces_comments(js, i + sizeof "undefined" - 1, &line, &last_newline);
+            if (js[i] == ':') {
+                strcpy(&js_min[js_min_length], "undefined");
+                js_min_length += sizeof "undefined" - 1;
+            }
+            else {
+                strcpy(&js_min[js_min_length], "void 0");
+                js_min_length += sizeof "void 0" - 1;
+            }
             continue;
         }
         if ((i == 0 || strchr(identifier_delimiters, js[i - 1]) != NULL) &&

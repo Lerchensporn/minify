@@ -16,6 +16,10 @@ assert()
 	fi
 }
 
+input='"abc" + \n "def"'
+expected='"abcdef"'
+assert "$expected" "$input"
+
 input='/*! do not remove */'
 expected='/*! do not remove */'
 assert "$expected" "$input"
@@ -36,8 +40,8 @@ input='if(1);'
 expected='if(1);'
 assert "$expected" "$input"
 
-input='let obj = {true: true, false: false}'
-expected='let obj={true:!0,false:!1}'
+input='let obj = {true: true, false: false, undefined: undefined}'
+expected='let obj={true:!0,false:!1,undefined:void 0}'
 assert "$expected" "$input"
 
 input='+ +i;i+ +1'
