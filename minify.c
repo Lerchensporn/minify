@@ -146,6 +146,7 @@ char *minify_css(const char *css)
     while (true) {
         if (css[i] == '\0') {
             if (syntax_block != SYNTAX_BLOCK_RULE_START) {
+                free(css_min);
                 if (syntax_block == SYNTAX_BLOCK_STYLE) {
                     fprintf(stderr, "Unexpected end of document, expected }\n");
                 }
@@ -155,16 +156,13 @@ char *minify_css(const char *css)
                 else if (syntax_block == SYNTAX_BLOCK_ATRULE) {
                     fprintf(stderr, "Unexpected end of document, expected ; or {…}\n");
                 }
-                free(css_min);
+                else {
+                    fprintf(stderr, "Unexpected end of document\n");
+                }
                 return NULL;
             }
             css_min[css_min_length++] = '\0';
             break;
-        }
-        if (css[i - 1] == '\\') {
-            css_min[css_min_length++] = css[i];
-            i += 1;
-            continue;
         }
         if (css[i] == '}') {
             do {
@@ -256,13 +254,37 @@ char *minify_css(const char *css)
             i += 1;
             continue;
         }
-        if (css[i] == '"' || css[i] == '\'') {
-            // TODO: active_backslash
-            int k = i;
+        if (css[i] == '\\') {
             css_min[css_min_length++] = css[i++];
-            while ((css[i] != css[k] || css[i - 1] == '\\') && css[i] != '\0') {
+            bool active_backslash = true;
+            while (css[i] == '\\') {
+                active_backslash = !active_backslash;
+                css_min[css_min_length++] = css[i++];
+            }
+            if (active_backslash) {
+                css_min[css_min_length++] = css[i++];
+            }
+            continue;
+        }
+        if (css[i] == '"' || css[i] == '\'') {
+            int k = i;
+            int column_start = i - last_newline;
+            css_min[css_min_length++] = css[i++];
+            bool active_backslash = false;
+            while (css[i] != '\0' && (css[i] != css[k] || active_backslash)) {
+                if (css[i] == '\\') {
+                    active_backslash = !active_backslash;
+                }
+                else {
+                    active_backslash = false;
+                }
                 css_min[css_min_length++] = css[i];
                 i += 1;
+            }
+            if (css[i] == '\0') {
+                free(css_min);
+                fprintf(stderr, "Unclosed string starting in line %d, column %d\n", line, column_start);
+                return NULL;
             }
             css_min[css_min_length++] = css[k];
             i += 1;
@@ -303,6 +325,7 @@ char *minify_css(const char *css)
             continue;
         }
         if (css[i] == '0' && css[i + 1] == '.' && (i == 0 || css[i - 1] < '0' || css[i - 1] > '9')) {
+            // Converting for example `0.1` to `.1`
             i += 1;
             continue;
         }
@@ -533,6 +556,7 @@ char *minify_js(const char *js)
             js_min[js_min_length++] = '\0';
             break;
         }
+        //copy_loud_comment(js_min, &js_min_length, js, &i, &line, &last_newline); 2274
         /*
         if (
             !strncmp(&js[i], "function", sizeof "function" - 1) &&
@@ -739,7 +763,7 @@ char *minify_js(const char *js)
             continue;
         }
         if (js[i] == '/' && js[i + 1] != '/' && js[i + 1] != '*' &&
-            (js_min_length == 0 || strchr("^!&|([><+-*%:?~{,;=", js_min[js_min_length - 1]) != NULL))
+            (js_min_length == 0 || strchr("^!&|([{><+-*%:?~,;=", js_min[js_min_length - 1]) != NULL))
         {
             // This is a regex object.
 

@@ -16,6 +16,10 @@ assert()
 	fi
 }
 
+input='/*! do not remove */'
+expected='/*! do not remove */'
+assert "$expected" "$input"
+
 input='a /**/ + /*o/*o*/ a  #b { c : 1px/**//**/1px;/**/; ;;d:"/* "  3 ;; }'
 expected='a+a #b{c:1px 1px;d:"/* " 3}'
 assert "$expected" "$input"
