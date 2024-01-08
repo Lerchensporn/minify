@@ -551,51 +551,37 @@ char *minify_js(const char *js)
 
         // We determine the next keyword or identifier
 
-        char next_identifier[1024];
-        int next_identifier_length = 0;
-
-        while (strchr(identifier_delimiters, js[i]) == NULL) {
-            if (next_identifier_length >= sizeof next_identifier - 1) {
-                fprintf(stderr, "Too long identifier in line %d, column %d\n", line,
-                    i - next_identifier_length - last_newline);
-                free(js_min);
-                return NULL;
-            }
-            next_identifier[next_identifier_length++] = js[i++];
+        int next_identifier_length = 0;//strcspn(&js[i], identifier_delimiters);
+        while (strchr(identifier_delimiters, js[i + next_identifier_length]) == NULL) {
+            next_identifier_length += 1;
         }
-        next_identifier[next_identifier_length] = '\0';
-
-        /*
-        next_identifier_length = strcspn(&js[i], identifier_delimiters);
-        if (next_identifier_length > 0) {
-            memcpy(next_identifier, &js[i], next_identifier_length);
-            i += next_identifier_length;
-        }
-        next_identifier[next_identifier_length] = '\0';
-        */
 
         // Keywords lose their meaning when used as object keys
 
-        if (next_identifier_length > 0) {
-            int k = i;
-            skip_whitespaces_comments(js, &k, NULL, NULL, NULL, NULL, true);
-            if (js[k] == ':') {
-                strcpy(&js_min[js_min_length], next_identifier);
-                js_min_length += next_identifier_length;
-                continue;
-            }
+        if (next_identifier_length == 0) {
+            goto after_keywords;
+        }
+
+        int k = i + next_identifier_length;
+        skip_whitespaces_comments(js, &k, NULL, NULL, NULL, NULL, true);
+        if (js[k] == ':') {
+            strncpy(&js_min[js_min_length], &js[i], next_identifier_length);
+            js_min_length += next_identifier_length;
+            i += next_identifier_length;
+            continue;
         }
 
         // Next we handle keywords
 
-        if (!strcmp(next_identifier, "function")) {
+        if (next_identifier_length == sizeof "function" - 1 && !strncmp(&js[i], "function", next_identifier_length)) {
             // We consume the input until `(` of the parameter list.
             //
             // Regular functions cannot be safely replaced by arrow functions.  Arrow functions
             // cannot be used as constructors: `new arrow_function()` where `arrow_function` is an
             // arrow function is invalid.
 
-            strcpy(&js_min[js_min_length], next_identifier);
+            strncpy(&js_min[js_min_length], &js[i], next_identifier_length);
+            i += next_identifier_length;
             js_min_length += next_identifier_length;
 
             skip_whitespaces_comments(js, &i, js_min, &js_min_length, &line, &last_newline, true);
@@ -628,11 +614,12 @@ char *minify_js(const char *js)
             continue;
         }
         if (
-            !strcmp(next_identifier, "if") ||
-            !strcmp(next_identifier, "for") ||
-            !strcmp(next_identifier, "while")
+            next_identifier_length == sizeof "if" - 1 && !strncmp(&js[i], "if", next_identifier_length) ||
+            next_identifier_length == sizeof "for" - 1 && !strncmp(&js[i], "for", next_identifier_length) ||
+            next_identifier_length == sizeof "while" - 1 && !strncmp(&js[i], "while", next_identifier_length)
         ) {
-            strcpy(&js_min[js_min_length], next_identifier);
+            strncpy(&js_min[js_min_length], &js[i], next_identifier_length);
+            i += next_identifier_length;
             js_min_length += next_identifier_length;
             skip_whitespaces_comments(js, &i, js_min, &js_min_length, &line, &last_newline, true);
             if (js[i] != '(') {
@@ -650,8 +637,9 @@ char *minify_js(const char *js)
             js_min[js_min_length++] = '(';
             continue;
         }
-        if (!strcmp(next_identifier, "else")) {
-            strcpy(&js_min[js_min_length], next_identifier);
+        if (next_identifier_length == sizeof "else" - 1 && !strncmp(&js[i], "else", next_identifier_length)) {
+            strncpy(&js_min[js_min_length], &js[i], next_identifier_length);
+            i += next_identifier_length;
             js_min_length += next_identifier_length;
             int k = i;
             skip_whitespaces_comments(js, &k, NULL, NULL, NULL, NULL, true);
@@ -682,26 +670,30 @@ char *minify_js(const char *js)
             }
             continue;
         }
-        if (!strcmp(next_identifier, "undefined")) {
+        if (next_identifier_length == sizeof "undefined" - 1 && !strncmp(&js[i], "undefined", next_identifier_length)) {
             strcpy(&js_min[js_min_length], "void 0");
+            i += next_identifier_length;
             js_min_length += sizeof "void 0" - 1;
             continue;
         }
-        if (!strcmp(next_identifier, "true") || !strcmp(next_identifier, "false")) {
+        if (next_identifier_length == sizeof "true" - 1 && !strncmp(&js[i], "true", next_identifier_length) ||
+            next_identifier_length == sizeof "false" - 1 && !strncmp(&js[i], "false", next_identifier_length))
+        {
             if (js_min_length > 0 && js_min[js_min_length - 1] == ' ') {
                 js_min_length -= 1;
             }
             js_min[js_min_length++] = '!';
-            js_min[js_min_length++] = next_identifier[0] == 't' ? '0' : '1';
+            js_min[js_min_length++] = js[i] == 't' ? '0' : '1';
+            i += next_identifier_length;
             continue;
         }
 
-        if (next_identifier[0] != '\0') {
-            strcpy(&js_min[js_min_length], next_identifier);
-            js_min_length += next_identifier_length;
-        }
+        strncpy(&js_min[js_min_length], &js[i], next_identifier_length);
+        i += next_identifier_length;
+        js_min_length += next_identifier_length;
 
         // Below we handle special characters
+    after_keywords:
 
         if (js[i] == '{') {
             if (++curly_nesting_level == sizeof curly_block / sizeof curly_block[0]) {
