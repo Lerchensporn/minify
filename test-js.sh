@@ -4,20 +4,30 @@ assert()
 {
 	result="$(echo -e "$2" | ./build/native/minify js -)"
 	if [ "$?" != "0" ]; then
-		echo 'Crashed on:'
+		echo Crashed on:
 		echo "$2"
+		echo Standard output:
+		echo "$result"
 		exit 1
 	elif [ "$1" != "$result" ]; then
 		echo 'Error: expected:'
 		echo "$1"
-		echo 'got:'
+		echo got:
 		echo "$result"
 		exit 1
 	fi
 }
 
-input='"abc" + \n "def"'
-expected='"abcdef"'
+input='(...arg)=>{}'
+expected='(...arg)=>{}'
+assert "$expected" "$input"
+
+input='if(1){}else\n { } \n"bla"'
+expected='if(1);else;"bla"'
+assert "$expected" "$input"
+
+input='"abc" + \n "def"  /*! silly place for comment */ +"O"'
+expected='"abcdef"/*! silly place for comment */+"O"'
 assert "$expected" "$input"
 
 input='/*! do not remove */'
@@ -69,15 +79,18 @@ expected='function(){}'
 assert "$expected" "$input"
 
 input='a()\nb() \n '
-expected='a();b()'
+expected='a()
+b()'
 assert "$expected" "$input"
 
 input='\n (\n )\n =>\n  Math\n .\n sin\n (\n 1\n )\n ;\n '
-expected='()=>Math.sin(1)'
+expected='()=>Math.sin
+(1)'
 assert "$expected" "$input"
 
 input='() => {} \n () => {};'
-expected='()=>{};()=>{}'
+expected='()=>{}
+()=>{}'
 assert "$expected" "$input"
 
 input='a=0\n/**/\nb=0'
@@ -86,7 +99,7 @@ b=0'
 assert "$expected" "$input"
 
 input='{function(){};};a=3'
-expected='{function(){}}a=3'
+expected='{function(){}};a=3'
 assert "$expected" "$input"
 
 input='( abc ) => 1;'
@@ -102,7 +115,8 @@ expected='/  /;3>/  /;a&/  /'
 assert "$expected" "$input"
 
 input='function a () {}; function b () {}\n if(true) {} ; a=3'
-expected='function a(){}function b(){}if(!0);a=3'
+expected='function a(){};function b(){}
+if(!0);a=3'
 assert "$expected" "$input"
 
 echo 'Passed all tests'
