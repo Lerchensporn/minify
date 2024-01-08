@@ -553,6 +553,7 @@ char *minify_js(const char *js)
 
         char next_identifier[1024];
         int next_identifier_length = 0;
+
         while (strchr(identifier_delimiters, js[i]) == NULL) {
             if (next_identifier_length >= sizeof next_identifier - 1) {
                 fprintf(stderr, "Too long identifier in line %d, column %d\n", line,
@@ -563,6 +564,15 @@ char *minify_js(const char *js)
             next_identifier[next_identifier_length++] = js[i++];
         }
         next_identifier[next_identifier_length] = '\0';
+
+        /*
+        next_identifier_length = strcspn(&js[i], identifier_delimiters);
+        if (next_identifier_length > 0) {
+            memcpy(next_identifier, &js[i], next_identifier_length);
+            i += next_identifier_length;
+        }
+        next_identifier[next_identifier_length] = '\0';
+        */
 
         // Keywords lose their meaning when used as object keys
 
