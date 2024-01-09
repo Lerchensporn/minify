@@ -173,13 +173,13 @@ char *minify_css(const char *css)
             if (syntax_block != SYNTAX_BLOCK_RULE_START) {
                 free(css_min);
                 if (syntax_block == SYNTAX_BLOCK_STYLE) {
-                    fprintf(stderr, "Unexpected end of document, expected }\n");
+                    fprintf(stderr, "Unexpected end of document, expected `}`\n");
                 }
                 else if (syntax_block == SYNTAX_BLOCK_QRULE) {
-                    fprintf(stderr, "Unexpected end of document, expected {…}\n");
+                    fprintf(stderr, "Unexpected end of document, expected `{…}`\n");
                 }
                 else if (syntax_block == SYNTAX_BLOCK_ATRULE) {
-                    fprintf(stderr, "Unexpected end of document, expected ; or {…}\n");
+                    fprintf(stderr, "Unexpected end of document, expected `;` or `{…}`\n");
                 }
                 else {
                     fprintf(stderr, "Unexpected end of document\n");
