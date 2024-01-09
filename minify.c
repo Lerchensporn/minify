@@ -903,7 +903,6 @@ char *minify_js(const char *js)
         if (js[i] == '}') {
             if (--curly_nesting_level < 0) {
                 free(js_min);
-                printf("%.*s\n", 100, &js[i]);
                 fprintf(stderr, "Unexpected `}` in line %d, column %d\n", line, i - last_newline);
                 return NULL;
             }
@@ -1099,7 +1098,7 @@ char *minify_js(const char *js)
                 continue;
             }
             if (old_line != line) {
-                // In JavaScript, a `\n` can end a statement similar to `;`. We only remove `\n` when we are
+                // In JavaScript, `\n` can end a statement similar to `;`. We only remove `\n` when we are
                 // sure that it neither ends a statement nor is required as a white-space between keywords or
                 // identifiers. To keep this minifier simple, we accept to miss some occasions were `\n` can
                 // be removed.
@@ -1659,6 +1658,7 @@ int main(int argc, const char *argv[])
         input_min = NULL;
     }
     if (input_min == NULL) {
+        free(input);
         return EXIT_FAILURE;
     }
     if (benchmark) {
