@@ -18,6 +18,14 @@ assert()
 	fi
 }
 
+input='do a=3;while(0);do!1;while(0);'
+expected='do a=3;while(0);do!1;while(0);'
+assert "$expected" "$input"
+
+input='"a\\\nb\\\nc"'
+expected='"abc"'
+assert "$expected" "$input"
+
 input='try {} \n catch \n (\n ) {\n }\nfinally\n {}\n"bla"'
 expected='try{}catch(){}finally{}"bla"'
 assert "$expected" "$input"
@@ -59,7 +67,7 @@ expected='if(1);'
 assert "$expected" "$input"
 
 input='let obj = {true: true, false: false, undefined: undefined}'
-expected='let obj={true:!0,false:!1,undefined:void 0}'
+expected='let obj={true:!0,false:!1,undefined:undefined}'
 assert "$expected" "$input"
 
 input='+ +i;i+ +1'

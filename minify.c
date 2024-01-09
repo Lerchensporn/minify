@@ -541,7 +541,6 @@ char *minify_css(const char *css)
         perror(NULL);
         return NULL;
     }
-    printf("line %d\n", line);
     return css_min_realloc;
 }
 
@@ -657,6 +656,11 @@ char *minify_js(const char *js)
                 js_min[js_min_length++] = '{';
                 i += 1;
             }
+            else if (next_word_length == sizeof "do" - 1) {
+                if (strchr(identifier_delimiters, js[i]) == NULL) {
+                    js_min[js_min_length++] = ' ';
+                }
+            }
             else {
                 fprintf(stderr, "Expected `{` in line %d, column %d\n", line, i - last_newline);
                 free(js_min);
@@ -767,12 +771,13 @@ char *minify_js(const char *js)
             }
             continue;
         }
-        if (next_word_length == sizeof "undefined" - 1 && !strncmp(&js[i], "undefined", next_word_length)) {
-            strcpy(&js_min[js_min_length], "void 0");
-            i += next_word_length;
-            js_min_length += sizeof "void 0" - 1;
-            continue;
-        }
+        // Cannot make this replacement because some idiots redefine `undefined` in the local scope.
+        // if (next_word_length == sizeof "undefined" - 1 && !strncmp(&js[i], "undefined", next_word_length)) {
+        //    strcpy(&js_min[js_min_length], "void 0");
+        //    i += next_word_length;
+        //    js_min_length += sizeof "void 0" - 1;
+        //    continue;
+        //}
         if (next_word_length == sizeof "true" - 1 && !strncmp(&js[i], "true", next_word_length) ||
             next_word_length == sizeof "false" - 1 && !strncmp(&js[i], "false", next_word_length))
         {
@@ -962,25 +967,31 @@ char *minify_js(const char *js)
         {
             // This is a regex object.
 
+            int regex_start_line = line, regex_start_column = i - last_newline;
             js_min[js_min_length++] = '/';
             i += 1;
             bool active_backslash = false;
             bool in_angular_brackets = false;
             while (js[i] != '\0' && (js[i] != '/' || active_backslash || in_angular_brackets)) {
                 js_min[js_min_length++] = js[i];
-                if (js[i] == '\\') {
+                if (js[i] == '[' && !active_backslash) {
+                    in_angular_brackets = true;
+                }
+                else if (js[i] == ']' && !active_backslash) {
+                    in_angular_brackets = false;
+                }
+                if (js[i++] == '\\') {
                     active_backslash = !active_backslash;
                 }
                 else {
                     active_backslash = false;
                 }
-                if (js[i] == '[' && !active_backslash) {
-                    in_angular_brackets = true;
-                }
-                if (js[i] == ']' && !active_backslash) {
-                    in_angular_brackets = false;
-                }
-                i += 1;
+            }
+            if (js[i] != '/') {
+                free(js_min);
+                fprintf(stderr, "Unclosed regex starting in line %d, column %d\n", regex_start_line,
+                    regex_start_column);
+                return NULL;
             }
             js_min[js_min_length++] = '/';
             i += 1;
@@ -993,26 +1004,30 @@ char *minify_js(const char *js)
             i += 1;
             bool active_backslash = false;
             while (js[i] != '\0' && (js[i] != quot || active_backslash)) {
-                js_min[js_min_length++] = js[i];
-                if (js[i] == '\\') {
-                    active_backslash = !active_backslash;
-                }
-                else {
-                    active_backslash = false;
-                }
                 if (js[i] == '\n') {
-                    if (quot == '`') {
+                    if (active_backslash) {
+                        i += 1;
+                        js_min_length -= 1;
+                        continue;
+                    }
+                    else if (quot == '`') {
                         line += 1;
                         last_newline = i;
                     }
                     else {
                         free(js_min);
-                        fprintf(stderr, "String contains unescaped newline in line %d, column %d\n",
+                        fprintf(stderr, "String contains unescaped newline in line %d, column %d|\n",
                             line, i - last_newline);
                         return NULL;
                     }
                 }
-                i += 1;
+                js_min[js_min_length++] = js[i];
+                if (js[i++] == '\\') {
+                    active_backslash = !active_backslash;
+                }
+                else {
+                    active_backslash = false;
+                }
             }
             if (js[i] != quot) {
                 free(js_min);
@@ -1089,12 +1104,14 @@ char *minify_js(const char *js)
                 // need to consider backward and forward compatibility with different JavaScript versions and
                 // with TypeScript.
 
-                const char trim_newline_after[] = ".([{;=*-+^!~?:,><-+'\"/`|&";
+                const char trim_newline_after[] = ".([{;=*-+^!~?:,><-+/|&";
                 if (strchr(trim_newline_after, js_min[js_min_length - 1]) != NULL) {
                     continue;
                 }
 
-                const char trim_newline_before[] = ")]}.;=*-+^!~?:,><-+/|&";
+                // Standalone lines may start with: +-~!"'`/ and more
+
+                const char trim_newline_before[] = ")]}.;=*^?:,><|&";
                 if (strchr(trim_newline_before, js[i]) != NULL) {
                     continue;
                 }
@@ -1641,8 +1658,8 @@ int main(int argc, char *argv[])
         int strlen_input = strlen(input);
         int strlen_input_min = strlen(input_min);
         printf(
-            "Reduced the size from %d to %d bytes (%.1f%% of the original size)\n",
-            strlen_input, strlen_input_min, 100.0 * strlen_input_min / strlen_input
+            "Reduced the size by %.1f%% from %d to %d bytes\n",
+            100.0 - 100.0 * strlen_input_min / strlen_input, strlen_input, strlen_input_min
         );
     }
     else {
