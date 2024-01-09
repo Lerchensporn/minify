@@ -18,6 +18,14 @@ assert()
 	fi
 }
 
+input='try {} \n catch \n (\n ) {\n }\nfinally\n {}\n"bla"'
+expected='try{}catch(){}finally{}"bla"'
+assert "$expected" "$input"
+
+input='const a = function a () {}; function b(){}; debugger;'
+expected='const a=function a(){};function b(){}debugger'
+assert "$expected" "$input"
+
 input='(...arg)=>{}'
 expected='(...arg)=>{}'
 assert "$expected" "$input"
@@ -62,8 +70,8 @@ input='let a=function(){};let b=3'
 expected='let a=function(){};let b=3'
 assert "$expected" "$input"
 
-input='(arg) => {} ; () => {} ;  do(() => {})'
-expected='arg=>{};()=>{};do(()=>{})'
+input='(arg) => {} ; () => {} ;  func(() => {})'
+expected='arg=>{};()=>{};func(()=>{})'
 assert "$expected" "$input"
 
 input='for(;; i++){};/**/;;'
@@ -115,8 +123,7 @@ expected='/  /;3>/  /;a&/  /'
 assert "$expected" "$input"
 
 input='function a () {}; function b () {}\n if(true) {} ; a=3'
-expected='function a(){};function b(){}
-if(!0);a=3'
+expected='function a(){}function b(){}if(!0);a=3'
 assert "$expected" "$input"
 
 echo 'Passed all tests'

@@ -48,42 +48,42 @@ static bool is_whitespace(const char c)
     return c == ' ' || c == '\t' || c == '\n' || c == '\r';
 }
 
-static bool skip_whitespaces_comments(const char *js, int *i, char *js_min, int *js_min_length,
-    int *line, int *last_newline, bool support_double_slash_comments)
+static bool skip_whitespaces_comments(const char *input, int *i, char *min, int *min_length, int *line,
+    int *last_newline, bool support_double_slash_comments)
 {
     bool preserve_comment = false;
     int preserved_comment_start;
     do {
-        while (is_whitespace(js[*i])) {
-            if (line != NULL && js[*i] == '\n') {
+        while (is_whitespace(input[*i])) {
+            if (line != NULL && input[*i] == '\n') {
                 *line += 1;
                 *last_newline = *i;
             }
             *i += 1;
         }
         preserved_comment_start = -1;
-        if (js[*i] == '\0') {
+        if (input[*i] == '\0') {
             break;
         }
-        else if (js[*i] == '/' && js[*i + 1] == '*') {
-            if (js[*i + 2] == '!') {
+        else if (input[*i] == '/' && input[*i + 1] == '*') {
+            if (input[*i + 2] == '!') {
                 preserved_comment_start = *i;
             }
             *i += 2;
-            while (js[*i] != '\0' && (js[*i] != '*' || js[*i + 1] != '/')) {
-                if (line != NULL && js[*i] == '\n') {
+            while (input[*i] != '\0' && (input[*i] != '*' || input[*i + 1] != '/')) {
+                if (line != NULL && input[*i] == '\n') {
                     *line += 1;
                     *last_newline = *i;
                 }
                 *i += 1;
             }
-            if (js[*i] != '\0') {
+            if (input[*i] != '\0') {
                 *i += 2;
             }
         }
-        else if (support_double_slash_comments && js[*i] == '/' && js[*i + 1] == '/') {
+        else if (support_double_slash_comments && input[*i] == '/' && input[*i + 1] == '/') {
             *i += 2;
-            while (js[*i] != '\0' && js[*i] != '\n') {
+            while (input[*i] != '\0' && input[*i] != '\n') {
                 *i += 1;
             }
         }
@@ -92,9 +92,9 @@ static bool skip_whitespaces_comments(const char *js, int *i, char *js_min, int 
         }
         if (preserved_comment_start >= 0) {
             preserve_comment = true;
-            if (js_min != NULL) {
-                strncpy(&js_min[*js_min_length], &js[preserved_comment_start], *i - preserved_comment_start);
-                *js_min_length += *i - preserved_comment_start;
+            if (min != NULL) {
+                strncpy(&min[*min_length], &input[preserved_comment_start], *i - preserved_comment_start);
+                *min_length += *i - preserved_comment_start;
             }
         }
     } while (true);
@@ -529,7 +529,9 @@ char *minify_js(const char *js)
 
     enum {
         CURLY_BLOCK_UNKNOWN,
+        CURLY_BLOCK_STANDALONE,
         CURLY_BLOCK_FUNC_BODY,
+        CURLY_BLOCK_FUNC_BODY_STANDALONE,
         CURLY_BLOCK_CONDITION_BODY,
         CURLY_BLOCK_ARROWFUNC_BODY,
     } curly_block[64];
@@ -538,7 +540,9 @@ char *minify_js(const char *js)
     enum {
         ROUND_BLOCK_UNKNOWN,
         ROUND_BLOCK_CONDITION,
+        ROUND_BLOCK_CATCH_SWITCH,
         ROUND_BLOCK_PARAM,
+        ROUND_BLOCK_PARAM_STANDALONE,
         ROUND_BLOCK_PARAM_ARROWFUNC_SINGLE,
     } round_block[64];
     int round_nesting_level = 0;
@@ -549,40 +553,103 @@ char *minify_js(const char *js)
             break;
         }
 
-        // We determine the next keyword or identifier
-
-        int next_identifier_length = 0;//strcspn(&js[i], identifier_delimiters);
-        while (strchr(identifier_delimiters, js[i + next_identifier_length]) == NULL) {
-            next_identifier_length += 1;
+        int next_word_length = strcspn(&js[i], identifier_delimiters);
+        if (next_word_length == 0) {
+            goto after_keywords;
         }
 
         // Keywords lose their meaning when used as object keys
 
-        if (next_identifier_length == 0) {
-            goto after_keywords;
-        }
-
-        int k = i + next_identifier_length;
+        int k = i + next_word_length;
         skip_whitespaces_comments(js, &k, NULL, NULL, NULL, NULL, true);
         if (js[k] == ':') {
-            strncpy(&js_min[js_min_length], &js[i], next_identifier_length);
-            js_min_length += next_identifier_length;
-            i += next_identifier_length;
+            strncpy(&js_min[js_min_length], &js[i], next_word_length);
+            js_min_length += next_word_length;
+            i += next_word_length;
             continue;
         }
 
         // Next we handle keywords
 
-        if (next_identifier_length == sizeof "function" - 1 && !strncmp(&js[i], "function", next_identifier_length)) {
+        if (
+            next_word_length == sizeof "switch" - 1 && !strncmp(&js[i], "switch", next_word_length) ||
+            next_word_length == sizeof "catch" - 1 && !strncmp(&js[i], "catch", next_word_length)
+        ) {
+            strncpy(&js_min[js_min_length], &js[i], next_word_length);
+            i += next_word_length;
+            js_min_length += next_word_length;
+
+            skip_whitespaces_comments(js, &i, js_min, &js_min_length, &line, &last_newline, true);
+            if (js[i] == '(') {
+                if (++round_nesting_level == sizeof round_block / sizeof round_block[0]) {
+                    free(js_min);
+                    fprintf(stderr, "The nesting level of round brackets is too deep\n");
+                    return NULL;
+                }
+                round_block[round_nesting_level] = ROUND_BLOCK_CATCH_SWITCH;
+                js_min[js_min_length++] = '(';
+                i += 1;
+            }
+            else if (js[i] == '{') {
+                if (++curly_nesting_level == sizeof curly_block / sizeof curly_block[0]) {
+                    free(js_min);
+                    fprintf(stderr, "The nesting level of curly brackets is too deep\n");
+                    return NULL;
+                }
+                curly_block[curly_nesting_level] = CURLY_BLOCK_CONDITION_BODY;
+                js_min[js_min_length++] = '{';
+                i += 1;
+            }
+            else {
+                fprintf(stderr, "Expected `(` or `{` in line %d, column %d\n", line, i - last_newline);
+                free(js_min);
+                return NULL;
+            }
+            continue;
+        }
+        if (
+            next_word_length == sizeof "do" - 1 && !strncmp(&js[i], "do", next_word_length) ||
+            next_word_length == sizeof "try" - 1 && !strncmp(&js[i], "try", next_word_length) ||
+            next_word_length == sizeof "finally" - 1 && !strncmp(&js[i], "finally", next_word_length)
+        ) {
+            strncpy(&js_min[js_min_length], &js[i], next_word_length);
+            i += next_word_length;
+            js_min_length += next_word_length;
+
+            skip_whitespaces_comments(js, &i, js_min, &js_min_length, &line, &last_newline, true);
+            if (js[i] == '{') {
+                if (++curly_nesting_level == sizeof curly_block / sizeof curly_block[0]) {
+                    free(js_min);
+                    fprintf(stderr, "The nesting level of curly brackets is too deep\n");
+                    return NULL;
+                }
+                curly_block[curly_nesting_level] = CURLY_BLOCK_CONDITION_BODY;
+                js_min[js_min_length++] = '{';
+                i += 1;
+            }
+            else {
+                fprintf(stderr, "Expected `{` in line %d, column %d\n", line, i - last_newline);
+                free(js_min);
+                return NULL;
+            }
+            continue;
+        }
+        if (next_word_length == sizeof "function" - 1 && !strncmp(&js[i], "function", next_word_length)) {
             // We consume the input until `(` of the parameter list.
             //
             // Regular functions cannot be safely replaced by arrow functions.  Arrow functions
             // cannot be used as constructors: `new arrow_function()` where `arrow_function` is an
             // arrow function is invalid.
 
-            strncpy(&js_min[js_min_length], &js[i], next_identifier_length);
-            i += next_identifier_length;
-            js_min_length += next_identifier_length;
+            bool standalone =
+                js_min_length == 0 ||
+                js_min[js_min_length - 1] == ';' ||
+                js_min[js_min_length - 1] == '}' ||
+                js_min[js_min_length - 1] == '\n';
+
+            strncpy(&js_min[js_min_length], &js[i], next_word_length);
+            i += next_word_length;
+            js_min_length += next_word_length;
 
             skip_whitespaces_comments(js, &i, js_min, &js_min_length, &line, &last_newline, true);
 
@@ -608,19 +675,19 @@ char *minify_js(const char *js)
                 fprintf(stderr, "The nesting level of round brackets is too deep\n");
                 return NULL;
             }
-            round_block[round_nesting_level] = ROUND_BLOCK_PARAM;
+            round_block[round_nesting_level] = standalone ? ROUND_BLOCK_PARAM_STANDALONE : ROUND_BLOCK_PARAM;
             js_min[js_min_length++] = '(';
             i += 1;
             continue;
         }
         if (
-            next_identifier_length == sizeof "if" - 1 && !strncmp(&js[i], "if", next_identifier_length) ||
-            next_identifier_length == sizeof "for" - 1 && !strncmp(&js[i], "for", next_identifier_length) ||
-            next_identifier_length == sizeof "while" - 1 && !strncmp(&js[i], "while", next_identifier_length)
+            next_word_length == sizeof "if" - 1 && !strncmp(&js[i], "if", next_word_length) ||
+            next_word_length == sizeof "for" - 1 && !strncmp(&js[i], "for", next_word_length) ||
+            next_word_length == sizeof "while" - 1 && !strncmp(&js[i], "while", next_word_length)
         ) {
-            strncpy(&js_min[js_min_length], &js[i], next_identifier_length);
-            i += next_identifier_length;
-            js_min_length += next_identifier_length;
+            strncpy(&js_min[js_min_length], &js[i], next_word_length);
+            i += next_word_length;
+            js_min_length += next_word_length;
             skip_whitespaces_comments(js, &i, js_min, &js_min_length, &line, &last_newline, true);
             if (js[i] != '(') {
                 free(js_min);
@@ -637,10 +704,10 @@ char *minify_js(const char *js)
             js_min[js_min_length++] = '(';
             continue;
         }
-        if (next_identifier_length == sizeof "else" - 1 && !strncmp(&js[i], "else", next_identifier_length)) {
-            strncpy(&js_min[js_min_length], &js[i], next_identifier_length);
-            i += next_identifier_length;
-            js_min_length += next_identifier_length;
+        if (next_word_length == sizeof "else" - 1 && !strncmp(&js[i], "else", next_word_length)) {
+            strncpy(&js_min[js_min_length], &js[i], next_word_length);
+            i += next_word_length;
+            js_min_length += next_word_length;
             int k = i;
             skip_whitespaces_comments(js, &k, NULL, NULL, NULL, NULL, true);
             if (js[k] != '{') {
@@ -650,7 +717,7 @@ char *minify_js(const char *js)
             i += 1;
             k = i;
             bool preserved_comment =
-                skip_whitespaces_comments(js, &k, js_min, &js_min_length, &line, &last_newline, true);
+                skip_whitespaces_comments(js, &k, NULL, NULL, NULL, NULL, true);
             if (!preserved_comment && js[k] == '}') {
                 skip_whitespaces_comments(js, &i, js_min, &js_min_length, &line, &last_newline, true);
                 js_min[js_min_length++] = ';';
@@ -670,29 +737,28 @@ char *minify_js(const char *js)
             }
             continue;
         }
-        if (next_identifier_length == sizeof "undefined" - 1 && !strncmp(&js[i], "undefined", next_identifier_length)) {
+        if (next_word_length == sizeof "undefined" - 1 && !strncmp(&js[i], "undefined", next_word_length)) {
             strcpy(&js_min[js_min_length], "void 0");
-            i += next_identifier_length;
+            i += next_word_length;
             js_min_length += sizeof "void 0" - 1;
             continue;
         }
-        if (next_identifier_length == sizeof "true" - 1 && !strncmp(&js[i], "true", next_identifier_length) ||
-            next_identifier_length == sizeof "false" - 1 && !strncmp(&js[i], "false", next_identifier_length))
+        if (next_word_length == sizeof "true" - 1 && !strncmp(&js[i], "true", next_word_length) ||
+            next_word_length == sizeof "false" - 1 && !strncmp(&js[i], "false", next_word_length))
         {
             if (js_min_length > 0 && js_min[js_min_length - 1] == ' ') {
                 js_min_length -= 1;
             }
             js_min[js_min_length++] = '!';
             js_min[js_min_length++] = js[i] == 't' ? '0' : '1';
-            i += next_identifier_length;
+            i += next_word_length;
             continue;
         }
 
-        strncpy(&js_min[js_min_length], &js[i], next_identifier_length);
-        i += next_identifier_length;
-        js_min_length += next_identifier_length;
+        strncpy(&js_min[js_min_length], &js[i], next_word_length);
+        i += next_word_length;
+        js_min_length += next_word_length;
 
-        // Below we handle special characters
     after_keywords:
 
         if (js[i] == '{') {
@@ -721,6 +787,11 @@ char *minify_js(const char *js)
                     curly_block[curly_nesting_level] = CURLY_BLOCK_CONDITION_BODY;
                 }
             }
+            else if (js_min_length >= 1 && js_min[js_min_length - 1] == ')' &&
+                     round_block[round_nesting_level + 1] == ROUND_BLOCK_CATCH_SWITCH)
+            {
+                curly_block[curly_nesting_level] = CURLY_BLOCK_CONDITION_BODY;
+            }
             else if (js_min_length >= 2 &&
                      js_min[js_min_length - 2] == '=' && js_min[js_min_length - 1] == '>')
             {
@@ -730,6 +801,22 @@ char *minify_js(const char *js)
                      round_block[round_nesting_level + 1] == ROUND_BLOCK_PARAM)
             {
                 curly_block[curly_nesting_level] = CURLY_BLOCK_FUNC_BODY;
+            }
+            else if (js_min_length >= 1 && js_min[js_min_length - 1] == ')' &&
+                     round_block[round_nesting_level + 1] == ROUND_BLOCK_PARAM_STANDALONE)
+            {
+                curly_block[curly_nesting_level] = CURLY_BLOCK_FUNC_BODY_STANDALONE;
+            }
+            else if (
+                js_min_length >= 1 &&
+                (
+                    js_min[js_min_length - 1] == '}' ||
+                    js_min[js_min_length - 1] == ';' ||
+                    js_min[js_min_length - 1] == '{' ||
+                    js_min[js_min_length - 1] == '\n'
+                )
+            ) {
+                curly_block[curly_nesting_level] = CURLY_BLOCK_STANDALONE;
             }
             else {
                 curly_block[curly_nesting_level] = CURLY_BLOCK_UNKNOWN;
@@ -808,7 +895,7 @@ char *minify_js(const char *js)
                 i += 1;
                 continue;
             }
-            char before_semicolon = (js_min_length == 0 ? '}' : js_min[js_min_length - 1]);
+            char before_semicolon = (js_min_length == 0 ? '\0' : js_min[js_min_length - 1]);
             do {
                 i += 1;
                 skip_whitespaces_comments(js, &i, js_min, &js_min_length, &line, &last_newline, true);
@@ -822,6 +909,16 @@ char *minify_js(const char *js)
                 !(
                     before_semicolon == ')' &&
                     round_block[round_nesting_level + 1] == ROUND_BLOCK_CONDITION
+                )
+            ) {
+                continue;
+            }
+
+            if (
+                before_semicolon == '}' &&
+                (
+                    curly_block[curly_nesting_level + 1] == CURLY_BLOCK_FUNC_BODY_STANDALONE ||
+                    curly_block[curly_nesting_level + 1] == CURLY_BLOCK_STANDALONE
                 )
             ) {
                 continue;
@@ -873,6 +970,18 @@ char *minify_js(const char *js)
                 else {
                     active_backslash = false;
                 }
+                if (js[i] == '\n') {
+                    if (quot == '`') {
+                        line += 1;
+                        last_newline = i;
+                    }
+                    else {
+                        free(js_min);
+                        fprintf(stderr, "String contains unescaped newline in line %d, column %d\n",
+                            line, i - last_newline);
+                        return NULL;
+                    }
+                }
                 i += 1;
             }
             if (js[i] != quot) {
@@ -920,6 +1029,7 @@ char *minify_js(const char *js)
                 (
                     round_block[round_nesting_level + 1] == ROUND_BLOCK_CONDITION ||
                     round_block[round_nesting_level + 1] == ROUND_BLOCK_PARAM ||
+                    round_block[round_nesting_level + 1] == ROUND_BLOCK_PARAM_STANDALONE ||
                     js[i] == '='
                 )
             ) {
@@ -927,7 +1037,11 @@ char *minify_js(const char *js)
             }
             if (
                 js_min[js_min_length - 1] == '}' &&
-                curly_block[curly_nesting_level + 1] == CURLY_BLOCK_CONDITION_BODY
+                (
+                    curly_block[curly_nesting_level + 1] == CURLY_BLOCK_CONDITION_BODY ||
+                    curly_block[curly_nesting_level + 1] == CURLY_BLOCK_FUNC_BODY_STANDALONE ||
+                    curly_block[curly_nesting_level + 1] == CURLY_BLOCK_STANDALONE
+                )
             ) {
                 continue;
             }
