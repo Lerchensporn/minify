@@ -18,6 +18,10 @@ assert()
 	fi
 }
 
+input=';if(0);'
+expected='if(0);'
+assert "$expected" "$input"
+
 input='do a=3;while(0);do!1;while(0);'
 expected='do a=3;while(0);do!1;while(0);'
 assert "$expected" "$input"

@@ -18,11 +18,16 @@ build/debug/minify: minify.c
 	cc --debug -o $(build_dir)/minify minify.c
 
 .PHONY: test
-test: release
-	./test-js.sh
+test: release check
 	./test-xml.sh
 	./test-css.sh
 	./test-html.sh
+	./test-js.sh
+	./test-js-libs.sh
+
+.PHONY: check
+check:
+	cppcheck --enable=all --suppress=missingIncludeSystem minify.c
 
 .PHONY: clean
 clean:

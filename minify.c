@@ -52,7 +52,6 @@ static bool skip_whitespaces_comments(const char *input, int *i, char *min, int 
     int *last_newline, bool support_double_slash_comments)
 {
     bool preserve_comment = false;
-    int preserved_comment_start;
     do {
         while (is_whitespace(input[*i])) {
             if (line != NULL && input[*i] == '\n') {
@@ -61,7 +60,7 @@ static bool skip_whitespaces_comments(const char *input, int *i, char *min, int 
             }
             *i += 1;
         }
-        preserved_comment_start = -1;
+        int preserved_comment_start = -1;
         if (input[*i] == '\0') {
             break;
         }
@@ -589,13 +588,15 @@ char *minify_js(const char *js)
 
         // Keywords lose their meaning when used as object keys
 
-        int k = i + next_word_length;
-        skip_whitespaces_comments(js, &k, NULL, NULL, NULL, NULL, true);
-        if (js[k] == ':') {
-            strncpy(&js_min[js_min_length], &js[i], next_word_length);
-            js_min_length += next_word_length;
-            i += next_word_length;
-            continue;
+        {
+            int k = i + next_word_length;
+            skip_whitespaces_comments(js, &k, NULL, NULL, NULL, NULL, true);
+            if (js[k] == ':') {
+                strncpy(&js_min[js_min_length], &js[i], next_word_length);
+                js_min_length += next_word_length;
+                i += next_word_length;
+                continue;
+            }
         }
 
         // Next we handle keywords
@@ -880,7 +881,6 @@ char *minify_js(const char *js)
                 while (strchr(identifier_delimiters, js[k]) == NULL) {
                     k += 1;
                 }
-                int arg_end = k;
                 skip_whitespaces_comments(js, &k, NULL, NULL, NULL, NULL, true);
                 if (k > arg_start && js[k] == ')') {
                     k += 1;
@@ -924,13 +924,17 @@ char *minify_js(const char *js)
             continue;
         }
         if (js[i] == ';') {
+            if (js_min_length == 0) {
+                i += 1;
+                continue;
+            }
             if (round_nesting_level > 0 && round_block[round_nesting_level] == ROUND_BLOCK_CONDITION) {
                 // Do not remove `;` in `for(;;i++){…}`
                 js_min[js_min_length++] = ';';
                 i += 1;
                 continue;
             }
-            char before_semicolon = (js_min_length == 0 ? '\0' : js_min[js_min_length - 1]);
+            char before_semicolon = js_min[js_min_length - 1];
             do {
                 i += 1;
                 skip_whitespaces_comments(js, &i, js_min, &js_min_length, &line, &last_newline, true);
@@ -967,12 +971,17 @@ char *minify_js(const char *js)
         {
             // This is a regex object.
 
-            int regex_start_line = line, regex_start_column = i - last_newline;
+            int regex_start_column = i - last_newline;
             js_min[js_min_length++] = '/';
             i += 1;
             bool active_backslash = false;
             bool in_angular_brackets = false;
             while (js[i] != '\0' && (js[i] != '/' || active_backslash || in_angular_brackets)) {
+                if (js[i] == '\n') {
+                    free(js_min);
+                    fprintf(stderr, "Illegal newline in regex in line %d, column %d\n", line, i - last_newline);
+                    return NULL;
+                }
                 js_min[js_min_length++] = js[i];
                 if (js[i] == '[' && !active_backslash) {
                     in_angular_brackets = true;
@@ -989,8 +998,7 @@ char *minify_js(const char *js)
             }
             if (js[i] != '/') {
                 free(js_min);
-                fprintf(stderr, "Unclosed regex starting in line %d, column %d\n", regex_start_line,
-                    regex_start_column);
+                fprintf(stderr, "Unclosed regex starting in line %d, column %d\n", line, regex_start_column);
                 return NULL;
             }
             js_min[js_min_length++] = '/';
@@ -1147,7 +1155,7 @@ char *minify_js(const char *js)
         perror(NULL);
         return NULL;
     }
-    return js_min;
+    return js_min_realloc;
 }
 
 enum sgml_subset {
@@ -1192,8 +1200,7 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
         if (sgml[i] == '\0') {
             if (syntax_block == SYNTAX_BLOCK_TAG) {
                 free(sgml_min);
-                fprintf(stderr, "Unexpected end of document, expected `>`\n",
-                        line, i - last_newline);
+                fprintf(stderr, "Unexpected end of document, expected `>`\n");
                 return NULL;
             }
             sgml_min[sgml_min_length++] = '\0';
@@ -1240,7 +1247,7 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
                         line, i - last_newline);
                 return NULL;
             }
-            if (sgml[i + 1] == '/' && is_whitespace(sgml[i + 1])) {
+            if (sgml[i + 1] == '/' && is_whitespace(sgml[i + 2])) {
                 free(sgml_min);
                 fprintf(stderr, "Illegal whitespace after `/` in line %d, column %d\n",
                         line, i - last_newline + 1);
@@ -1498,7 +1505,7 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
         perror(NULL);
         return NULL;
     }
-    return sgml_min;
+    return sgml_min_realloc;
 }
 
 char *minify_xml(const char *xml)
@@ -1566,7 +1573,7 @@ char *minify_json(const char *json)
         perror(NULL);
         return NULL;
     }
-    return json_min;
+    return json_min_realloc;
 }
 
 static void print_usage()
@@ -1574,7 +1581,7 @@ static void print_usage()
     fputs("Usage: minify <css|js|xml|html|json> <input file|-> [--benchmark]\n", stderr);
 }
 
-int main(int argc, char *argv[])
+int main(int argc, const char *argv[])
 {
     bool benchmark = false;
     const char *format_str = NULL;
