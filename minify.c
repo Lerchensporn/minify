@@ -194,7 +194,7 @@ char *minify_css(const char *css)
             do {
                 if (nesting_level == 0) {
                     free(css_min);
-                    fprintf(stderr, "Unexpected } in line %d, column %d\n", line, i - last_newline);
+                    fprintf(stderr, "Unexpected `}` in line %d, column %d\n", line, i - last_newline);
                     return NULL;
                 }
                 css_min[css_min_length++] = '}';
@@ -208,8 +208,7 @@ char *minify_css(const char *css)
         if (syntax_block == SYNTAX_BLOCK_RULE_START) {
             if (css[i] == '{' || css[i] == '}' || css[i] == '"' || css[i] == '\'') {
                 free(css_min);
-                fprintf(stderr, "Unexpected %c in line %d, column %d\n",
-                        css[i], line, i - last_newline);
+                fprintf(stderr, "Unexpected `%c` in line %d, column %d\n", css[i], line, i - last_newline);
                 return NULL;
             }
             css_min[css_min_length++] = css[i];
@@ -230,45 +229,71 @@ char *minify_css(const char *css)
             }
             continue;
         }
-        if (i > 2 && css[i] == '(' && css[i - 1] == 'l' && css[i - 2] == 'r' && css[i - 3] == 'u') {
+        if (i >= 3 && !strncmp(&css[i - 3], "url(", 4)) {
+            css_min[css_min_length++] = '(';
             i += 1;
             while (is_whitespace(css[i])) {
+                if (css[i] == '\n') {
+                    line += 1;
+                    last_newline = i;
+                }
                 i += 1;
             }
-            css_min[css_min_length++] = '(';
             if (css[i] == '"' || css[i] == '\'') {
-                // TODO: active_backslash
+                int quot_start_line = line, quot_start_column = i - last_newline;
                 char quot = css[i];
+                bool active_backslash = false;
                 do {
+                    if (css[i] == '\n') {
+                        line += 1;
+                        last_newline = i;
+                    }
+                    if (css[i] == '\\') {
+                        active_backslash = !active_backslash;
+                    }
+                    else {
+                        active_backslash = false;
+                    }
                     css_min[css_min_length++] = css[i];
                     i += 1;
-                } while ((css[i] != quot || css[i - 1] == '\\') && css[i] != '\0');
+                } while ((css[i] != quot || active_backslash) && css[i] != '\0');
+                if (css[i] == '\0') {
+                    free(css_min);
+                    fprintf(stderr, "Unclosed string starting in line %d, column %d\n",
+                        quot_start_line, quot_start_column);
+                    return NULL;
+                }
                 css_min[css_min_length++] = quot;
                 i += 1;
                 while (is_whitespace(css[i])) {
+                    if (css[i] == '\n') {
+                        line += 1;
+                        last_newline = i;
+                    }
                     i += 1;
                 }
                 if (css[i] != ')') {
                     free(css_min);
-                    fprintf(stderr, "Expected ) in line %d, column %d\n",
-                            line, i - last_newline);
+                    fprintf(stderr, "Expected `)` in line %d, column %d\n", line, i - last_newline);
                     return NULL;
                 }
             }
             else {
-                while ((css[i] != ')' || css[i - 1] == '\\') && css[i] != '\0' &&
-                    !is_whitespace(css[i]))
-                {
+                while ((css[i] != ')' || css[i - 1] == '\\') && css[i] != '\0' && !is_whitespace(css[i])) {
                     css_min[css_min_length++] = css[i];
                     i += 1;
                 }
                 while (is_whitespace(css[i])) {
+                    if (css[i] == '\n') {
+                        line += 1;
+                        last_newline = i;
+                    }
                     i += 1;
                 }
                 if (css[i] != ')') {
                     free(css_min);
                     if (css[i] == '\0') {
-                        fprintf(stderr, "Unexpected end of document, expected )\n");
+                        fprintf(stderr, "Unexpected end of document, expected `)`\n");
                     }
                     else if (is_whitespace(css[i - 1])) {
                         fprintf(stderr, "Illegal white-space in URL in line %d, column %d\n",
@@ -299,6 +324,10 @@ char *minify_css(const char *css)
             css_min[css_min_length++] = css[i++];
             bool active_backslash = false;
             while (css[i] != '\0' && (css[i] != css[k] || active_backslash)) {
+                if (css[i] == '\n') {
+                    line += 1;
+                    last_newline = i;
+                }
                 if (css[i] == '\\') {
                     active_backslash = !active_backslash;
                 }
@@ -334,7 +363,7 @@ char *minify_css(const char *css)
             nesting_level += 1;
             if (syntax_block == SYNTAX_BLOCK_STYLE)  {
                 free(css_min);
-                fprintf(stderr, "Unexpected { in line %d, column %d\n", line, i - last_newline);
+                fprintf(stderr, "Unexpected `{` in line %d, column %d\n", line, i - last_newline);
                 return NULL;
             }
             css_min[css_min_length++] = '{';
@@ -512,6 +541,7 @@ char *minify_css(const char *css)
         perror(NULL);
         return NULL;
     }
+    printf("line %d\n", line);
     return css_min_realloc;
 }
 
@@ -869,7 +899,7 @@ char *minify_js(const char *js)
             if (--curly_nesting_level < 0) {
                 free(js_min);
                 printf("%.*s\n", 100, &js[i]);
-                fprintf(stderr, "Unexpected } in line %d, column %d\n", line, i - last_newline);
+                fprintf(stderr, "Unexpected `}` in line %d, column %d\n", line, i - last_newline);
                 return NULL;
             }
             js_min[js_min_length++] = '}';
@@ -882,7 +912,7 @@ char *minify_js(const char *js)
             }
             if (--round_nesting_level < 0) {
                 free(js_min);
-                fprintf(stderr, "Unexpected ) in line %d, column %d\n", line, i - last_newline);
+                fprintf(stderr, "Unexpected `)` in line %d, column %d\n", line, i - last_newline);
                 return NULL;
             }
             i += 1;
@@ -986,7 +1016,7 @@ char *minify_js(const char *js)
             }
             if (js[i] != quot) {
                 free(js_min);
-                fprintf(stderr, "Unexpected end of document, expected %c\n", quot);
+                fprintf(stderr, "Unexpected end of document, expected `%c`\n", quot);
                 return NULL;
             }
             i += 1;
@@ -1119,7 +1149,7 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
         i += 1;
     }
     if (sgml[i] != '<' && sgml[i] != '\0') {
-        fprintf(stdout, "Expected < in line %d, column %d\n", line, i - last_newline);
+        fprintf(stdout, "Expected `<` in line %d, column %d\n", line, i - last_newline);
         return NULL;
     }
 
@@ -1145,7 +1175,7 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
         if (sgml[i] == '\0') {
             if (syntax_block == SYNTAX_BLOCK_TAG) {
                 free(sgml_min);
-                fprintf(stderr, "Unexpected end of document, expected >\n",
+                fprintf(stderr, "Unexpected end of document, expected `>`\n",
                         line, i - last_newline);
                 return NULL;
             }
@@ -1153,6 +1183,7 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
             break;
         }
         if (!strncmp(&sgml[i], "<!--", 4)) {
+            int comment_start_line = line, comment_start_column = i - last_newline;
             i += 4;
             while (sgml[i] != '\0' && strncmp(&sgml[i], "-->", 3)) {
                 if (sgml[i] == '\n') {
@@ -1163,8 +1194,8 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
             }
             if (sgml[i] == '\0') {
                 free(sgml_min);
-                fprintf(stderr, "Unexpected end of document inside a comment\n",
-                        line, i - last_newline);
+                fprintf(stderr, "Unclosed comment starting in line %d, column %d\n", comment_start_line,
+                    comment_start_column);
                 return NULL;
             }
             i += 3;
@@ -1183,18 +1214,18 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
         if (sgml[i] == '<') {
             if (syntax_block == SYNTAX_BLOCK_TAG) {
                 free(sgml_min);
-                fprintf(stderr, "Invalid `<` in line %d, column %d\n", line, i - last_newline);
+                fprintf(stderr, "Illegal `<` in line %d, column %d\n", line, i - last_newline);
                 return NULL;
             }
             if (is_whitespace(sgml[i + 1])) {
                 free(sgml_min);
-                fprintf(stderr, "Invalid whitespace after `<` in line %d, column %d\n",
+                fprintf(stderr, "Illegal whitespace after `<` in line %d, column %d\n",
                         line, i - last_newline);
                 return NULL;
             }
             if (sgml[i + 1] == '/' && is_whitespace(sgml[i + 1])) {
                 free(sgml_min);
-                fprintf(stderr, "Invalid whitespace after `/` in line %d, column %d\n",
+                fprintf(stderr, "Illegal whitespace after `/` in line %d, column %d\n",
                         line, i - last_newline + 1);
                 return NULL;
             }
@@ -1223,7 +1254,7 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
         if (sgml[i] == '>') {
             if (syntax_block == SYNTAX_BLOCK_CONTENT) {
                 free(sgml_min);
-                fprintf(stderr, "Invalid `>` in line %d, column %d\n", line, i - last_newline);
+                fprintf(stderr, "Illegal `>` in line %d, column %d\n", line, i - last_newline);
                 return NULL;
             }
             if (sgml[i - 1] == '/') {
@@ -1243,6 +1274,10 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
                 sgml_min[sgml_min_length++] = '>';
                 i += 3 + current_tag_length;
                 while (sgml[i] != '>' && sgml[i] != '\0') {
+                    if (sgml[i] == '\n') {
+                        line += 1;
+                        last_newline = i;
+                    }
                     i += 1;
                 }
                 syntax_block = SYNTAX_BLOCK_CONTENT;
@@ -1295,11 +1330,12 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
                (sgml_min_length == 0 || sgml_min[sgml_min_length - 1] != '='))
             {
                 free(sgml_min);
-                fprintf(stderr, "Expected = before quote in line %d, column %d\n",
+                fprintf(stderr, "Expected `=` before quote in line %d, column %d\n",
                         line, i - last_newline);
                 return NULL;
             }
             char quote = sgml[i];
+            int string_start_line = line, string_start_column = i - last_newline;
             i += 1;
             bool need_quotes;
             if (sgml_subset == SGML_SUBSET_XML || syntax_block == SYNTAX_BLOCK_DOCTYPE) {
@@ -1320,12 +1356,28 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
                 sgml_min[sgml_min_length++] = quote;
             }
             while (sgml[i] != '\0' && sgml[i] != quote) {
+                if (sgml[i] == '\n') {
+                    line += 1;
+                    last_newline = i;
+                }
                 sgml_min[sgml_min_length++] = sgml[i];
                 i += 1;
             }
             if (sgml[i] == '\0') {
                 free(sgml_min);
-                fprintf(stderr, "Unexpected end of document, expected %c\n", quote);
+                fprintf(stderr, "Unclosed string starting in line %d, column %d\n",
+                    string_start_line, string_start_column);
+                return NULL;
+            }
+            i += 1;
+            if (
+                !is_whitespace(sgml[i]) && sgml[i] != '>' &&
+                (sgml[i] != '/' || sgml[i + 1] != '>') &&
+                (sgml[i] != '?' || sgml[i + 1] != '>')
+            ) {
+                free(sgml_min);
+                fprintf(stderr, "Illegal character after `%c` in line %d, column %d\n", quote,
+                    line, i - last_newline);
                 return NULL;
             }
             if (need_quotes) {
@@ -1335,7 +1387,6 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
             // else if (sgml[i + 1] == '/') {
             //    sgml_min[sgml_min_length++] = ' ';
             // }
-            i += 1;
             continue;
         }
         if (syntax_block == SYNTAX_BLOCK_TAG && is_whitespace(sgml[i])) {
@@ -1361,6 +1412,10 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
             // must not be removed from the content of script tags.
 
             while (sgml[i] != '\0' && strncmp(&sgml[i], "</script", sizeof "</script" - 1)) {
+                if (sgml[i] == '\n') {
+                    line += 1;
+                    last_newline = i;
+                }
                 sgml_min[sgml_min_length++] = sgml[i];
                 i += 1;
             }
@@ -1391,6 +1446,7 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
                 if (sgml[i] == '\0' || strncmp(&sgml[i], "<!--", 4)) {
                     break;
                 }
+                int comment_start_line = line, comment_start_column = i - last_newline;
                 i += 4;
                 while (sgml[i] != '\0' && strncmp(&sgml[i], "-->", 3)) {
                     if (sgml[i] == '\n') {
@@ -1401,7 +1457,8 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
                 }
                 if (sgml[i] == '\0') {
                     free(sgml_min);
-                    fprintf(stderr, "Unexpected end of document inside a comment\n");
+                    fprintf(stderr, "Unclosed comment starting in line %d, column %d\n", comment_start_line,
+                        comment_start_column);
                     return NULL;
                 }
                 i += 3;
@@ -1410,6 +1467,10 @@ static char *minify_sgml(const char *sgml, enum sgml_subset sgml_subset)
                 sgml_min[sgml_min_length++] = ' ';
             }
             continue;
+        }
+        if (sgml[i] == '\n') {
+            line += 1;
+            last_newline = i;
         }
         sgml_min[sgml_min_length++] = sgml[i];
         i += 1;
@@ -1440,13 +1501,15 @@ char *minify_json(const char *json)
         perror(NULL);
         return NULL;
     }
-    int json_min_length = 0;
-    int i = 0;
+    int json_min_length = 0, line = 1, i = 0;
     while (true) {
         if (json[i] == '\0') {
             break;
         }
         while (is_whitespace(json[i])) {
+            if (json[i] == '\n') {
+                line += 1;
+            }
             i += 1;
         }
         if (json[i] == '"') {
@@ -1454,6 +1517,11 @@ char *minify_json(const char *json)
             json_min[json_min_length++] = '"';
             bool active_backslash = false;
             while (json[i] != '\0' && (json[i] != '"' || active_backslash)) {
+                if (json[i] == '\n') {
+                    free(json_min);
+                    fprintf(stderr, "Illegal newline in JSON string in line %d\n", line);
+                    return NULL;
+                }
                 if (json[i] == '\\') {
                     active_backslash = !active_backslash;
                 }
@@ -1465,7 +1533,7 @@ char *minify_json(const char *json)
             }
             if (json[i] == '\0') {
                 free(json_min);
-                fprintf(stderr, "Unclosed JSON string\n");
+                fprintf(stderr, "Unexpected end of document, expected `\"`\n");
                 return NULL;
             }
             json_min[json_min_length++] = '"';
