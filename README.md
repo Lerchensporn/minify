@@ -1,7 +1,14 @@
+# Lerchensporn/minify
+
 This is a minifier for CSS, JavaScript, XML, HTML and JSON, written in C. It is
 designed according to the following requirements:
 
 - Released as single binary with no dependencies except libc.
+
+- This tool is intended to be run by Makefile recipes to copy & minimize static assets from a
+  `src/` folder to a `build/release/` folder. An additional debug make-target may omit the
+  minification.  It is not envisioned to create bindings for scripting languages. Just use the
+  command-line interface, or if really needed, usage via FFI should work fine.
 
 - Produce standard-conform output from any standard-conform input.
 
@@ -19,8 +26,8 @@ designed according to the following requirements:
    - Not removing doctypes or XML headers. They do have a meaning.
    - Minification of colors is a possible future objective because doing it in
      the source code can decrease its legibility.
-   - More advanced JavaScript minification is a possible future objective. Shortening variable
-     names would provides the most minification potential.
+   - Mangling of JavaScript identifiers is a possible future objective.
+   - Not collapsing boolean HTML attributes or omitting `type=text/javascript`.
 
 - Cleaning exported SVG files is better done with a cleaner such as `svgcleaner`.
   With default options, such cleaners substantially modify the markup
@@ -120,6 +127,12 @@ https://terser.org/
 
 https://github.com/mishoo/UglifyJS
 
+https://swc.rs/playground
+
+https://bun.sh/
+
+https://esbuild.github.io/
+
 ## SVG optimizers
 
 https://github.com/RazrFalcon/svgcleaner
@@ -146,3 +159,4 @@ Written in C.
 `xmllint` as part of libxml2 (https://gitlab.gnome.org/GNOME/libxml2)
 
 Written in C.
+
