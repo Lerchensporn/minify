@@ -533,7 +533,7 @@ struct Minification minify_json(const char *json)
 {
     char *json_min = malloc(strlen(json) + 1);
     if (json_min == NULL) {
-        struct Minification minification = {.result = NULL};
+        struct Minification minification = {.result = NULL, .error_line = 0, .error_column = 0};
         strncpy(minification.error_string, strerror(errno), sizeof minification.error_string - 1);
         return minification;
     }
@@ -1270,10 +1270,9 @@ static void sgml_correct_error_position(const char *encoded, const char *decoded
     int (*tagncmp)(const char *, const char *, size_t);
     tagncmp = (sgml_subset == SGML_SUBSET_XML ? strncmp : strnicmp);
     while (true) {
-        if (
-            *error_line == decoded_line &&
-            *error_column == decoded_i - decoded_last_newline
-        ) {
+        if (*error_line == decoded_line &&
+            *error_column == decoded_i - decoded_last_newline)
+        {
             *error_line = encoded_line;
             *error_column = encoded_i - encoded_last_newline;
             return;
@@ -1377,7 +1376,7 @@ static struct Minification sgml_decode(const char *input, int length, enum sgml_
     tagncmp = (sgml_subset == SGML_SUBSET_XML ? strncmp : strnicmp);
     char *result = malloc(length + 1);
     if (result == NULL) {
-        struct Minification minification = {.result = NULL};
+        struct Minification minification = {.result = NULL, .error_line = 0, .error_column = 0};
         strncpy(minification.error_string, strerror(errno), sizeof minification.error_string - 1);
         return minification;
     }
@@ -1453,7 +1452,7 @@ static struct Minification sgml_decode(const char *input, int length, enum sgml_
                 }
                 else {
                     for (k = 2; input[i + k] != ';'; ++k) {
-                        if (input[i + k] >= '0' || input[i + k] <= '9') {
+                        if (input[i + k] >= '0' && input[i + k] <= '9') {
                             codepoint = codepoint * 10 + (input[i + k] - '0');
                         }
                         else {
@@ -1530,11 +1529,11 @@ static struct Minification sgml_decode(const char *input, int length, enum sgml_
     return (struct Minification) {.result = result};
 }
 
-static char *xml_encode(char *input, const int input_length, int *output_length)
+static char *xml_encode(const char *input, const int input_length, int *output_length)
 {
     int added_length_with_cdata = sizeof "<![CDATA[]]>" - 1;
     int added_length_with_entities = 0;
-    int i;
+    int i = 0;
     while (true) {
         if (input[i] == '\0') {
             break;
@@ -2212,7 +2211,7 @@ static struct Minification minify_sgml(const char *sgml, enum sgml_subset sgml_s
     char *sgml_min_realloc = realloc(sgml_min, sgml_min_length);
     if (sgml_min_realloc == NULL) {
         free(sgml_min);
-        struct Minification minification = {.result = NULL};
+        struct Minification minification = {.result = NULL, .error_line = 0, .error_column = 0};
         strncpy(minification.error_string, strerror(errno), sizeof minification.error_string - 1);
         return minification;
     }
