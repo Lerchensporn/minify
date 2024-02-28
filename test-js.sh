@@ -18,6 +18,10 @@ assert()
 	fi
 }
 
+input='undefined=123'
+expected='undefined=123'
+assert "$expected" "$input"
+
 input=';if(0);'
 expected='if(0);'
 assert "$expected" "$input"
