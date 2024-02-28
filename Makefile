@@ -1,8 +1,8 @@
 CROSS_TRIPLE ?= native
 build_dir = build/$(CROSS_TRIPLE)
 
-.PHONY: release
-release: $(build_dir)/minify
+.PHONY: build
+build: $(build_dir)/minify
 
 $(build_dir)/minify: minify.c
 	mkdir -p $(build_dir)

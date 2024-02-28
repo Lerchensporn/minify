@@ -468,18 +468,9 @@ struct Minification minify_css(const char *css)
                 // but not in "@page :left{}".
 
                 skip_whitespaces_comments(css, &i, css_min, &css_min_length, &line, &last_newline, false);
-                if (
-                    css_min[css_min_length - 1] != '(' &&
-                    css_min[css_min_length - 1] != ',' &&
-                    css_min[css_min_length - 1] != '<' &&
-                    css_min[css_min_length - 1] != '>' &&
-                    css_min[css_min_length - 1] != ':' &&
-                    css[i] != ')' &&
-                    css[i] != ',' &&
-                    css[i] != '<' &&
-                    css[i] != '>' &&
-                    css[i] != ':'
-                ) {
+                if (strchr("(,<>:", css_min[css_min_length - 1]) == NULL &&
+                    strchr("),<>:", css[i]) == NULL)
+                {
                     css_min[css_min_length++] = ' ';
                 }
             }
@@ -487,71 +478,39 @@ struct Minification minify_css(const char *css)
                      syntax_block == SYNTAX_BLOCK_QRULE_SQUARE_BRACKETS)
             {
                 skip_whitespaces_comments(css, &i, css_min, &css_min_length, &line, &last_newline, false);
-                if (
-                    css_min[css_min_length - 1] != '[' &&
-                    css_min[css_min_length - 1] != '=' &&
-                    css_min[css_min_length - 1] != ',' &&
-                    css[i] != ']' &&
-                    css[i] != '=' &&
-                    css[i] != ',' &&
-                    css[i] != '*' &&
-                    css[i] != '$' &&
-                    css[i] != '^' &&
-                    css[i] != '~' &&
-                    css[i] != '|'
-                ) {
+                if (strchr("[=,", css_min[css_min_length - 1]) == NULL &&
+                    strchr("]=,*$^-|", css[i]) == NULL)
+                {
                     css_min[css_min_length++] = ' ';
                 }
             }
             else if (syntax_block == SYNTAX_BLOCK_ATRULE) {
                 int before_whitespace = i;
                 skip_whitespaces_comments(css, &i, css_min, &css_min_length, &line, &last_newline, false);
-                if (
-                    // Remove white-space before ( in `@media (...){}` but not in
-                    // `@media all and (...){}`.
 
-                    (css[i] != '(' || &atrule[atrule_length - 1] != &css[before_whitespace] - 1) &&
-                    css_min[css_min_length - 1] != ',' &&
-                    css_min[css_min_length - 1] != ')' &&
-                    css_min[css_min_length - 1] != '(' &&
-                    css[i] != ',' &&
-                    css[i] != ')' &&
-                    css[i] != ';' &&
-                    css[i] != '{'
-                ) {
+                // Remove whitespace before ( in `@media (...){}` but not in
+                // `@media all and (...){}`.
+
+                if ((css[i] != '(' || &atrule[atrule_length - 1] != &css[before_whitespace] - 1) &&
+                    strchr(",)(", css_min[css_min_length - 1]) == NULL &&
+                    strchr(",);{", css[i]) == NULL)
+                {
                     css_min[css_min_length++] = ' ';
                 }
             }
             else if (syntax_block == SYNTAX_BLOCK_QRULE) {
                 skip_whitespaces_comments(css, &i, css_min, &css_min_length, &line, &last_newline, false);
-                if (
-                    css_min[css_min_length - 1] != '~' &&
-                    css_min[css_min_length - 1] != '>' &&
-                    css_min[css_min_length - 1] != '+' &&
-                    css_min[css_min_length - 1] != ',' &&
-                    css_min[css_min_length - 1] != ']' &&
-                    css[i] != '~' &&
-                    css[i] != '>' &&
-                    css[i] != '+' &&
-                    css[i] != ',' &&
-                    css[i] != '[' &&
-                    css[i] != '{'
-                ) {
+                if (strchr("~>+,]", css_min[css_min_length - 1]) == NULL &&
+                    strchr("~>+,[{", css[i]) == NULL)
+                {
                     css_min[css_min_length++] = ' ';
                 }
             }
             else if (syntax_block == SYNTAX_BLOCK_STYLE) {
                 skip_whitespaces_comments(css, &i, css_min, &css_min_length, &line, &last_newline, false);
-                if (
-                    css_min[css_min_length - 1] != '{' &&
-                    css_min[css_min_length - 1] != ':' &&
-                    css_min[css_min_length - 1] != ',' &&
-                    css[i] != '}' &&
-                    css[i] != ':' &&
-                    css[i] != ',' &&
-                    css[i] != ';' &&
-                    css[i] != '!'
-                ) {
+                if (strchr("{:,", css_min[css_min_length - 1]) == NULL &&
+                    strchr("}:,;!", css[i]) == NULL)
+                {
                     css_min[css_min_length++] = ' ';
                 }
             }
