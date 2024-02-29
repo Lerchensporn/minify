@@ -18,6 +18,10 @@ assert()
 	fi
 }
 
+input='"</script>"'
+expected='"</script>"'
+assert "$expected" "$input"
+
 input='undefined=123'
 expected='undefined=123'
 assert "$expected" "$input"

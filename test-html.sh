@@ -16,6 +16,18 @@ assert()
 	fi
 }
 
+input='<script>"<"+"/script>"</script>'
+expected='<script>"<\/script>"</script>'
+assert "$expected" "$input"
+
+input='<script>3 < /script>/</script>'
+expected='<script>3< /script>/</script>'
+assert "$expected" "$input"
+
+input='<script>a="</scri" + "pt>"</script>'
+expected='<script>a="<\/script>"</script>'
+assert "$expected" "$input"
+
 input='  a  b  '
 expected=' a b '
 assert "$expected" "$input"

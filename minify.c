@@ -56,6 +56,13 @@ static bool is_whitespace(const char c)
     return c == ' ' || c == '\t' || c == '\n' || c == '\r';
 }
 
+struct SkippingResult
+{
+    bool preserved_a_comment;
+    char error[128];
+    int error_position;
+};
+
 static bool skip_whitespaces_comments(const char *input, int *i, char *min, int *min_length,
     bool support_double_slash_comments)
 {
@@ -126,7 +133,7 @@ static int strnicmp(const char *s1, const char *s2, size_t length)
     return diff;
 }
 
-static bool is_nestable_atrule(const char *atrule, unsigned int atrule_length)
+static bool css_is_nestable_atrule(const char *atrule, unsigned int atrule_length)
 {
     return
         sizeof "@media" - 1 == atrule_length &&
@@ -144,6 +151,12 @@ static bool is_nestable_atrule(const char *atrule, unsigned int atrule_length)
 
 struct Minification minify_css(const char *css)
 {
+    struct Minification m = {0};
+    char *css_min = malloc(strlen(css) + 1);
+    if (css_min == NULL) {
+        strncpy(m.error, strerror(errno), sizeof m.error - 1);
+        return m;
+    }
     enum {
         SYNTAX_BLOCK_STYLE,
         SYNTAX_BLOCK_RULE_START,
@@ -154,21 +167,13 @@ struct Minification minify_css(const char *css)
         SYNTAX_BLOCK_ATRULE_ROUND_BRACKETS,
         SYNTAX_BLOCK_ATRULE_SQUARE_BRACKETS,
     } syntax_block = SYNTAX_BLOCK_RULE_START;
-    struct Minification m = {0};
-    char *css_min = malloc(strlen(css) + 1);
-    if (css_min == NULL) {
-        strncpy(m.error, strerror(errno), sizeof m.error - 1);
-        return m;
-    }
     int css_min_length = 0;
-
     const char *atrule = NULL;
     int atrule_length;
-
     int i = 0;
-    skip_whitespaces_comments(css, &i, css_min, &css_min_length, false);
-    int nesting_level = 0;
+    int nesting_level = -1;
 
+    skip_whitespaces_comments(css, &i, css_min, &css_min_length, false);
     while (true) {
         if (css[i] == '\0') {
             if (syntax_block != SYNTAX_BLOCK_RULE_START) {
@@ -190,12 +195,12 @@ struct Minification minify_css(const char *css)
                 strcpy(m.error, error);
                 return m;
             }
-            css_min[css_min_length++] = '\0';
+            css_min[css_min_length] = '\0';
             break;
         }
         if (css[i] == '}') {
             do {
-                if (nesting_level == 0) {
+                if (nesting_level == -1) {
                     free(css_min);
                     m.error_position = i;
                     strcpy(m.error, "Unexpected `}` in line %d, column %d\n");
@@ -245,12 +250,7 @@ struct Minification minify_css(const char *css)
                 char quot = css[i];
                 bool active_backslash = false;
                 do {
-                    if (css[i] == '\\') {
-                        active_backslash = !active_backslash;
-                    }
-                    else {
-                        active_backslash = false;
-                    }
+                    active_backslash = (css[i] == '\\') * !active_backslash;
                     css_min[css_min_length++] = css[i];
                     i += 1;
                 } while ((css[i] != quot || active_backslash) && css[i] != '\0');
@@ -283,11 +283,13 @@ struct Minification minify_css(const char *css)
                 if (css[i] != ')') {
                     free(css_min);
                     if (css[i] == '\0') {
+                        free(css_min);
                         m.error_position = i;
                         strcpy(m.error, "Unexpected end of stylesheet, expected `)` in line %d, column %d\n");
                         return m;
                     }
                     else if (is_whitespace(css[i - 1])) {
+                        free(css_min);
                         m.error_position = i;
                         strcpy(m.error, "Illegal whitespace in URL in line %d, column %d\n");
                         return m;
@@ -315,12 +317,7 @@ struct Minification minify_css(const char *css)
             css_min[css_min_length++] = css[i++];
             bool active_backslash = false;
             while (css[i] != '\0' && (css[i] != css[quote_start_i] || active_backslash)) {
-                if (css[i] == '\\') {
-                    active_backslash = !active_backslash;
-                }
-                else {
-                    active_backslash = false;
-                }
+                active_backslash = (css[i] == '\\') * !active_backslash;
                 css_min[css_min_length++] = css[i];
                 i += 1;
             }
@@ -362,12 +359,8 @@ struct Minification minify_css(const char *css)
                 syntax_block = SYNTAX_BLOCK_STYLE;
             }
             else if (syntax_block == SYNTAX_BLOCK_ATRULE) {
-                if (is_nestable_atrule(atrule, atrule_length) == true) {
-                    syntax_block = SYNTAX_BLOCK_RULE_START;
-                }
-                else {
-                    syntax_block = SYNTAX_BLOCK_STYLE;
-                }
+                syntax_block = css_is_nestable_atrule(atrule, atrule_length) ?
+                    SYNTAX_BLOCK_RULE_START : SYNTAX_BLOCK_STYLE;
             }
             continue;
         }
@@ -428,8 +421,7 @@ struct Minification minify_css(const char *css)
             if (syntax_block == SYNTAX_BLOCK_ATRULE_ROUND_BRACKETS ||
                 syntax_block == SYNTAX_BLOCK_QRULE_ROUND_BRACKETS)
             {
-                // We must remove white-space around ":" in "@media (with : 3 px){}"
-                // but not in "@page :left{}".
+                // Removing whitespace around `:` in `@media (with : 3 px){}` but not in `@page :left{}`
 
                 skip_whitespaces_comments(css, &i, css_min, &css_min_length, false);
                 if (strchr("(,<>:", css_min[css_min_length - 1]) == NULL &&
@@ -452,8 +444,7 @@ struct Minification minify_css(const char *css)
                 int before_whitespace = i;
                 skip_whitespaces_comments(css, &i, css_min, &css_min_length, false);
 
-                // Remove whitespace before ( in `@media (...){}` but not in
-                // `@media all and (...){}`.
+                // Removing whitespace before `(` in `@media (...){}` but not in `@media all and (...){}`
 
                 if ((css[i] != '(' || &atrule[atrule_length - 1] != &css[before_whitespace] - 1) &&
                     strchr(",)(", css_min[css_min_length - 1]) == NULL &&
@@ -483,7 +474,7 @@ struct Minification minify_css(const char *css)
         css_min[css_min_length++] = css[i];
         i += 1;
     }
-    m.result = realloc(css_min, css_min_length);
+    m.result = realloc(css_min, css_min_length + 1);
     if (m.result == NULL) {
         free(css_min);
         strncpy(m.error, strerror(errno), sizeof m.error - 1);
@@ -499,14 +490,57 @@ struct Minification minify_json(const char *json)
         strncpy(m.error, strerror(errno), sizeof m.error - 1);
         return m;
     }
+    char bracket_type[512];
+    int nesting_level = -1;
     int json_min_length = 0, i = 0;
     while (true) {
-        if (json[i] == '\0') {
-            break;
-        }
         while (is_whitespace(json[i])) {
             i += 1;
         }
+        if (json[i] == '\0') {
+            json_min[json_min_length] = '\0';
+            break;
+        }
+        if ((json[i] == ',' || json[i] == '}') && json_min[json_min_length - 1] == ':') {
+            free(json_min);
+            m.error_position = i;
+            sprintf(m.error, "No value after `:` in line %%d, column %%d\n", json[i]);
+            return m;
+        }
+        if (json[i] == '[' || json[i] == '{') {
+            if (++nesting_level == sizeof bracket_type / sizeof bracket_type[0]) {
+                free(json_min);
+                m.error_position = i;
+                strcpy(m.error, "The nesting level is getting too deep in line %d, column %d\n");
+                return m;
+            }
+            bracket_type[nesting_level] = json[i];
+            json_min[json_min_length++] = json[i];
+            i += 1;
+            continue;
+        }
+        if (json[i] == ']' || json[i] == '}') {
+            if (json_min[json_min_length - 1] == ',') {
+                free(json_min);
+                m.error_position = i;
+                strcpy(m.error, "Illegal `,` before bracket in line %d, column %d\n");
+                return m;
+            }
+            if (nesting_level == -1 || bracket_type[nesting_level] != json[i] - 2) {
+                free(json_min);
+                m.error_position = i;
+                sprintf(m.error, "Unexpected `%c` in line %%d, column %%d\n", json[i]);
+                return m;
+            }
+            nesting_level -= 1;
+            json_min[json_min_length++] = json[i];
+            i += 1;
+            continue;
+        }
+
+        bool is_key = (bracket_type[nesting_level] == '{' &&
+            (json_min[json_min_length - 1] == ',' || json_min[json_min_length - 1] == '{'));
+
         if (json[i] == '"') {
             i += 1;
             json_min[json_min_length++] = '"';
@@ -514,15 +548,37 @@ struct Minification minify_json(const char *json)
             while (json[i] != '\0' && (json[i] != '"' || active_backslash)) {
                 if (json[i] == '\n') {
                     free(json_min);
-                    m.error_position = i;
-                    strcpy(m.error, "Illegal newline in JSON string in line %d\n");
+                    m.error_position = i - 1;
+                    strcpy(m.error, "Illegal linebreak in JSON string after line %d\n");
                     return m;
                 }
-                if (json[i] == '\\') {
-                    active_backslash = !active_backslash;
+                active_backslash = (json[i] == '\\') * !active_backslash;
+                if (active_backslash && strchr("\"\\/bfnrtu", json[i + 1]) == NULL) {
+                    free(json_min);
+                    m.error_position = i;
+                    sprintf(m.error, "Invalid JSON escape sequence `\\%c` in line %%d, column %%d\n", json[i + 1]);
+                    return m;
                 }
-                else {
-                    active_backslash = false;
+                if (active_backslash && json[i + 1] == 'u') {
+                    bool invalid_unicode = false;
+                    int k;
+                    for (k = i + 2; k <= i + 5; ++k) {
+                        if (!(
+                            (json[k] >= '0' && json[k] <= '9') || json[k] >= 'a' && json[k] <= 'f' ||
+                            json[k] >= 'A' && json[k] <= 'F'
+                        )) {
+                            invalid_unicode = true;
+                        }
+                        if (json[k] == '"' || json[k] == '\n' || json[k] == '\0') {
+                            break;
+                        }
+                    }
+                    if (invalid_unicode) {
+                        free(json_min);
+                        m.error_position = i - 1;
+                        sprintf(m.error, "Invalid JSON escape sequence `%.*s` in line %%d, column %%d\n", k - i, &json[i]);
+                        return m;
+                    }
                 }
                 json_min[json_min_length++] = json[i];
                 i += 1;
@@ -535,12 +591,100 @@ struct Minification minify_json(const char *json)
             }
             json_min[json_min_length++] = '"';
             i += 1;
+            if (!is_key) {
+                continue;
+            }
+            while (is_whitespace(json[i])) {
+                i += 1;
+            }
+            if (json[i] != ':') {
+                free(json_min);
+                m.error_position = i;
+                sprintf(m.error, "Expected `:` instead of `%c` in line %%d, column %%d\n", json[i]);
+                return m;
+            }
+            json_min[json_min_length++] = ':';
+            i += 1;
             continue;
         }
-        json_min[json_min_length++] = json[i];
-        i += 1;
+
+        if (is_key) {
+            free(json_min);
+            m.error_position = i;
+            sprintf(m.error, "Expected `\"`, `[` or `{` instead of `%c` in line %%d, column %%d\n", json[i]);
+            return m;
+        }
+
+        if (!strncmp(&json[i], "true", sizeof "true" - 1) &&
+            (json[i + sizeof "true" - 1] == '\0' || strchr(" \r\t\n],}", json[i + sizeof "true" - 1]) != NULL))
+        {
+            strcpy(&json_min[json_min_length], "true");
+            json_min_length += sizeof "true" - 1;
+            i += sizeof "true" - 1;
+            continue;
+        }
+        if (!strncmp(&json[i], "false", sizeof "false" - 1) &&
+            (json[i + sizeof "false" - 1] == '\0' || strchr("\r\t\n],}", json[i + sizeof "false" - 1]) != NULL))
+        {
+            strcpy(&json_min[json_min_length], "false");
+            json_min_length += sizeof "false" - 1;
+            i += sizeof "false" - 1;
+            continue;
+        }
+        if (!strncmp(&json[i], "null", sizeof "null" - 1) &&
+            (json[i + sizeof "null" - 1] == '\0' || strchr("\r\t\n],}", json[i + sizeof "null" - 1]) != NULL))
+        {
+            strcpy(&json_min[json_min_length], "null");
+            json_min_length += sizeof "null" - 1;
+            i += sizeof "null" - 1;
+            continue;
+        }
+        if (json[i] >= '0' && json[i] <= '9') {
+            int k = i;
+            while (json[k] >= '0' && json[k] <= '9') {
+                k += 1;
+            }
+            if (json[k] == '.') {
+                k += 1;
+            }
+            while (json[k] >= '0' && json[k] <= '9') {
+                k += 1;
+            }
+            if ((json[k] == 'e' || json[k] == 'E') && (json[k + 1] == '+' || json[k + 1] == '-') &&
+                json[k + 2] >= '0' && json[k + 2] <= '9')
+            {
+                k += 2;
+            }
+            while (json[k] >= '0' && json[k] <= '9') {
+                k += 1;
+            }
+            memcpy(&json_min[json_min_length], &json[i], k - i);
+            json_min_length += k - i;
+            i = k;
+            continue;
+        }
+        if (nesting_level >= 0 && json[i] == ',' && json_min[json_min_length - 1] != ',') {
+            json_min[json_min_length++] = ',';
+            i += 1;
+            continue;
+        }
+        if (json[i] != '\0' && !is_whitespace(json[i])) {
+            free(json_min);
+            m.error_position = i;
+            sprintf(m.error, "Unexpected data starting with `%c` in line %%d, column %%d\n", json[i]);
+            return m;
+        }
     }
-    m.result = realloc(json_min, json_min_length);
+    if (nesting_level != -1) {
+        free(json_min);
+        do {
+            i -= 1;
+        } while (is_whitespace(json[i]));
+        m.error_position = i;
+        sprintf(m.error, "Missing `%c` after line %%d, column %%d\n", bracket_type[nesting_level]);
+        return m;
+    }
+    m.result = realloc(json_min, json_min_length + 1);
     if (m.result == NULL) {
         free(json_min);
         strncpy(m.error, strerror(errno), sizeof m.error - 1);
@@ -570,7 +714,7 @@ struct Minification minify_js(const char *js)
         CURLY_BLOCK_CONDITION_BODY,
         CURLY_BLOCK_ARROWFUNC_BODY,
     } curly_block[64];
-    int curly_nesting_level = 0;
+    int curly_nesting_level = -1;
 
     enum {
         ROUND_BLOCK_UNKNOWN,
@@ -580,11 +724,11 @@ struct Minification minify_js(const char *js)
         ROUND_BLOCK_PARAM_STANDALONE,
         ROUND_BLOCK_PARAM_ARROWFUNC_SINGLE,
     } round_block[64];
-    int round_nesting_level = 0;
+    int round_nesting_level = -1;
 
     while (true) {
         if (js[i] == '\0') {
-            js_min[js_min_length++] = '\0';
+            js_min[js_min_length] = '\0';
             break;
         }
 
@@ -934,7 +1078,7 @@ struct Minification minify_js(const char *js)
             continue;
         }
         if (js[i] == '}') {
-            if (--curly_nesting_level < 0) {
+            if (--curly_nesting_level < -1) {
                 free(js_min);
                 m.error_position = i;
                 strcpy(m.error, "Unexpected `}` in line %d, column %d\n");
@@ -948,7 +1092,7 @@ struct Minification minify_js(const char *js)
             if (round_block[round_nesting_level] != ROUND_BLOCK_PARAM_ARROWFUNC_SINGLE) {
                 js_min[js_min_length++] = ')';
             }
-            if (--round_nesting_level < 0) {
+            if (--round_nesting_level < -1) {
                 free(js_min);
                 m.error_position = i;
                 strcpy(m.error, "Unexpected `)` in line %d, column %d\n");
@@ -962,7 +1106,7 @@ struct Minification minify_js(const char *js)
                 i += 1;
                 continue;
             }
-            if (round_nesting_level > 0 && round_block[round_nesting_level] == ROUND_BLOCK_CONDITION) {
+            if (round_nesting_level >= 0 && round_block[round_nesting_level] == ROUND_BLOCK_CONDITION) {
                 // Do not remove `;` in `for(;;i++){…}`
                 js_min[js_min_length++] = ';';
                 i += 1;
@@ -1001,7 +1145,8 @@ struct Minification minify_js(const char *js)
             continue;
         }
         if (js[i] == '/' && js[i + 1] != '/' && js[i + 1] != '*' &&
-            (js_min_length == 0 || strchr("^!&|([{><+-*%:?~,;=", js_min[js_min_length - 1]) != NULL))
+            (js_min_length == 0 || strchr("^!&|([{><+-*%:?~,;=", js_min[js_min_length - 1]) != NULL ||
+            js_min[js_min_length - 1] == ' ' && js_min[js_min_length - 2] == '<'))
         {
             // This is a regex object.
 
@@ -1013,8 +1158,8 @@ struct Minification minify_js(const char *js)
             while (js[i] != '\0' && (js[i] != '/' || active_backslash || in_angular_brackets)) {
                 if (js[i] == '\n') {
                     free(js_min);
-                    m.error_position = i;
-                    strcpy(m.error, "Illegal newline in regex in line %d, column %d\n");
+                    m.error_position = i - 1;
+                    strcpy(m.error, "Illegal line break in regex at the end of line %d\n");
                     return m;
                 }
                 js_min[js_min_length++] = js[i];
@@ -1024,12 +1169,7 @@ struct Minification minify_js(const char *js)
                 else if (js[i] == ']' && !active_backslash) {
                     in_angular_brackets = false;
                 }
-                if (js[i++] == '\\') {
-                    active_backslash = !active_backslash;
-                }
-                else {
-                    active_backslash = false;
-                }
+                active_backslash = (js[i++] == '\\') * !active_backslash;
             }
             if (js[i] != '/') {
                 free(js_min);
@@ -1042,62 +1182,60 @@ struct Minification minify_js(const char *js)
             continue;
         }
         if (js[i] == '`' || js[i] == '"' || js[i] == '\'') {
-            char quot = js[i];
-            js_min[js_min_length++] = quot;
-        merge_quote:
+            js_min[js_min_length++] = js[i];
+        merge_strings:
+            int quote_i = i;
             i += 1;
             bool active_backslash = false;
-            while (js[i] != '\0' && (js[i] != quot || active_backslash)) {
+            while (js[i] != '\0' && (js[i] != js[quote_i] || active_backslash)) {
                 if (js[i] == '\n') {
                     if (active_backslash) {
                         i += 1;
                         js_min_length -= 1;
                         continue;
                     }
-                    else if (quot != '`') {
+                    else if (js[quote_i] != '`') {
                         free(js_min);
                         m.error_position = i;
-                        strcpy(m.error, "String contains unescaped newline in line %d, column %d\n");
+                        strcpy(m.error, "String contains unescaped linebreak in line %d, column %d\n");
                         return m;
                     }
                 }
                 js_min[js_min_length++] = js[i];
-                if (js[i++] == '\\') {
-                    active_backslash = !active_backslash;
+                if (i < quote_i + sizeof "</script" - 1 &&
+                    !strnicmp(&js_min[js_min_length - sizeof "</script" + 1], "</script", sizeof "</script" - 1))
+                {
+                    strcpy(&js_min[js_min_length - sizeof "</script" + 1], "<\\/script");
+                    js_min_length += 1;
                 }
-                else {
-                    active_backslash = false;
-                }
+                active_backslash = (js[i++] == '\\') * !active_backslash;
             }
-            if (js[i] != quot) {
+            if (js[i] != js[quote_i]) {
                 free(js_min);
                 m.error_position = i - 1;
                 sprintf(m.error,
-                    "Unexpected end of script, expected `%c` after line %%d, column %%d\n", quot);
+                    "Unexpected end of script, expected `%c` after line %%d, column %%d\n", js[quote_i]);
                 return m;
             }
             i += 1;
             int k = i;
             bool preserve_comment = skip_whitespaces_comments(js, &k, NULL, NULL, true);
-            if (!preserve_comment && js[k] == '+') {
-                k += 1;
-                preserve_comment = skip_whitespaces_comments(js, &k, NULL, NULL, true);
-                if (!preserve_comment && js[k] == quot) {
-                    skip_whitespaces_comments(js, &i, js_min, &js_min_length, true);
-                    i += 1;
-                    skip_whitespaces_comments(js, &i, js_min, &js_min_length, true);
-
-                    // Theoretically we may merge `"</scri" + "pt>"` to "</script>", breaking
-                    // inline JavaScript in HTML. The solution is to escape the `/` by replacing it
-                    // with `\/`. The problem is very unlikely, is not related to the JavaScript
-                    // language, is very easy to implement in the JavaScript source code, but would
-                    // be rather complicated to implement here.
-
-                    goto merge_quote;
-                }
+            if (preserve_comment || js[k] != '+') {
+                js_min[js_min_length++] = js[quote_i];
+                continue;
             }
-            js_min[js_min_length++] = quot;
-            continue;
+            k += 1;
+            preserve_comment = skip_whitespaces_comments(js, &k, NULL, NULL, true);
+            if (preserve_comment || js[k] != js[quote_i]) {
+                js_min[js_min_length++] = js[quote_i];
+                continue;
+            }
+
+            skip_whitespaces_comments(js, &i, js_min, &js_min_length, true);
+            i += 1; // Skipping the plus character
+            skip_whitespaces_comments(js, &i, js_min, &js_min_length, true);
+
+            goto merge_strings;
         }
         if (is_whitespace(js[i]) ||
             js[i] == '/' && js[i + 1] == '*' ||
@@ -1173,38 +1311,43 @@ struct Minification minify_js(const char *js)
                 // Standalone lines may start with: +-~!"'`/ and more
 
                 const char trim_newline_before[] = ")]}.;=*^?:,><|&";
-                if (strchr(trim_newline_before, js[i]) != NULL) {
-                    continue;
+                if (strchr(trim_newline_before, js[i]) == NULL) {
+                    js_min[js_min_length++] = '\n';
                 }
-                js_min[js_min_length++] = '\n';
             }
             else {
+                // Minifying a smaller-than comparison with a specific regex may produce a `</script` tag that
+                // breaks inline JavaScript in HTML. The HTML minifier could recognize such cases but does
+                // not know how to escape it correctly. It is nontrivial to distinguish such a smaller-than
+                // regex from a `</script` tag created by merging strings. Therefore this is the right place
+                // to handle the issue.
+
                 const char trim_space_around[] = ".()[]{},=*;?!:><-+'\"/|&`";
-                if (strchr(trim_space_around, js[i]) != NULL ||
-                    strchr(trim_space_around, js_min[js_min_length - 1]) != NULL)
+                if (strchr(trim_space_around, js[i]) == NULL &&
+                    strchr(trim_space_around, js_min[js_min_length - 1]) == NULL ||
+                    js_min[js_min_length - 1] == '<' && !strnicmp(&js[i], "/script", sizeof "/script" - 1))
                 {
-                    continue;
+                    js_min[js_min_length++] = ' ';
                 }
-                js_min[js_min_length++] = ' ';
             }
             continue;
         }
         js_min[js_min_length++] = js[i];
         i += 1;
     }
-    if (round_nesting_level != 0) {
+    if (round_nesting_level != -1) {
         free(js_min);
         m.error_position = last_open_round_bracket_i;
         strcpy(m.error, "Unclosed round bracket in line %d, column %d\n");
         return m;
     }
-    if (curly_nesting_level != 0) {
+    if (curly_nesting_level != -1) {
         free(js_min);
         m.error_position = last_open_curly_bracket_i;
         strcpy(m.error,  "Unclosed curly bracket in line %d, column %d\n");
         return m;
     }
-    m.result = realloc(js_min, js_min_length);
+    m.result = realloc(js_min, js_min_length + 1);
     if (m.result == NULL) {
         free(js_min);
         strncpy(m.error, strerror(errno), sizeof m.error - 1);
@@ -1592,7 +1735,7 @@ static struct Minification minify_sgml(const char *sgml, enum sgml_subset sgml_s
                 strcpy(m.error, "Unexpected end of document expected `>` after line %d, column %d\n");
                 return m;
             }
-            sgml_min[sgml_min_length++] = '\0';
+            sgml_min[sgml_min_length] = '\0';
             break;
         }
 
@@ -1803,6 +1946,7 @@ static struct Minification minify_sgml(const char *sgml, enum sgml_subset sgml_s
                 sgml[i] == ':' || sgml[i] == '_' ||
                 sgml[i] == '?'
             )) {
+                free(sgml_min);
                 m.error_position = i - 1;
                 sprintf(m.error,
                     "`%c` in line %%d, column %%d is followed by an illegal character\n", sgml[i - 1]);
@@ -1823,6 +1967,7 @@ static struct Minification minify_sgml(const char *sgml, enum sgml_subset sgml_s
                 sgml[i + current_tag_length] != '/' && sgml[i + current_tag_length] != '>' &&
                 !is_whitespace(sgml[i + current_tag_length])
             ) {
+                free(sgml_min);
                 m.error_position = i + current_tag_length;
                 strcpy(m.error, "Illegal character in tag name in in line %d, column %d\n");
                 return m;
@@ -1901,6 +2046,7 @@ static struct Minification minify_sgml(const char *sgml, enum sgml_subset sgml_s
                 sgml_min[sgml_min_length++] = ' ';
             }
             if (is_closing_tag && sgml[i] != '>') {
+                free(sgml_min);
                 m.error_position = i;
                 strcpy(m.error, "Illegal content in line %d, column %d after whitespace in closing tag\n");
                 return m;
@@ -1910,6 +2056,7 @@ static struct Minification minify_sgml(const char *sgml, enum sgml_subset sgml_s
         if (syntax_block == SYNTAX_BLOCK_TAG && sgml[i] != '=') {
             // Consume attribute
             if (sgml[i] == '"' || sgml[i] == '\'') {
+                free(sgml_min);
                 m.error_position = i;
                 sprintf(m.error, "Illegal character `%c` in line %%d, column %%d\n", sgml[i]);
                 return m;
@@ -1922,6 +2069,7 @@ static struct Minification minify_sgml(const char *sgml, enum sgml_subset sgml_s
                 i += 1;
             }
             if (sgml[i] == '/' && sgml[i + 1] != '>') {
+                free(sgml_min);
                 m.error_position = i;
                 strcpy(m.error, "`/` in line %d, column %d is not followed by `>` \n");
                 return m;
@@ -1934,6 +2082,7 @@ static struct Minification minify_sgml(const char *sgml, enum sgml_subset sgml_s
                 continue;
             }
             if (strchr("=> \r\t\n/", sgml[i]) == NULL) {
+                free(sgml_min);
                 m.error_position = i;
                 sprintf(m.error, "Illegal character `%c` after attribute in line %%d, column %%d\n", sgml[i]);
                 return m;
@@ -1943,6 +2092,7 @@ static struct Minification minify_sgml(const char *sgml, enum sgml_subset sgml_s
         if (syntax_block == SYNTAX_BLOCK_TAG && sgml[i] == '=') {
             // Consume `=` followed by quoted or unquoted value
             if (attribute_length == 0) {
+                free(sgml_min);
                 m.error_position = i;
                 strcpy(m.error, "No attribute before `=` in line %d, column %d\n");
                 return m;
@@ -1953,11 +2103,13 @@ static struct Minification minify_sgml(const char *sgml, enum sgml_subset sgml_s
                 i += 1;
             }
             if (sgml[i] == '=' || sgml[i] == '>') {
+                free(sgml_min);
                 m.error_position = i;
                 strcpy(m.error, "No value after `=` in line %d, column %d\n");
                 return m;
             }
             if (sgml_subset == SGML_SUBSET_XML && sgml[i] != '"' && sgml[i] != '\'') {
+                free(sgml_min);
                 m.error_position = i;
                 strcpy(m.error, "XML requires a quote after `=` in line %d, column %d\n");
                 return m;
@@ -2080,7 +2232,7 @@ static struct Minification minify_sgml(const char *sgml, enum sgml_subset sgml_s
         sgml_min[sgml_min_length++] = sgml[i];
         i += 1;
     }
-    m.result = realloc(sgml_min, sgml_min_length);
+    m.result = realloc(sgml_min, sgml_min_length + 1);
     if (m.result == NULL) {
         free(sgml_min);
         strncpy(m.error, strerror(errno), sizeof m.error - 1);
@@ -2114,16 +2266,14 @@ static struct LineColumn position_to_line_column(const char *text, int position)
     return lc;
 }
 
-static void print_usage()
-{
-    fputs("Usage: minify <css|js|xml|html|json> <input file|-> [--benchmark]\n", stderr);
-}
-
 int main(int argc, const char *argv[])
 {
     bool benchmark = false;
+    bool print_usage = false;
     const char *format_str = NULL;
     const char *input_filename = NULL;
+    enum {FORMAT_JS, FORMAT_CSS, FORMAT_XML, FORMAT_HTML, FORMAT_JSON} format;
+
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--benchmark")) {
             benchmark = true;
@@ -2135,22 +2285,14 @@ int main(int argc, const char *argv[])
             input_filename = argv[i];
         }
         else {
-            print_usage();
-            return EXIT_FAILURE;
+            print_usage = true;
+            break;
         }
     }
     if (format_str == NULL || input_filename == NULL) {
-        print_usage();
-        return EXIT_FAILURE;
+        print_usage = true;
     }
-    enum {
-        FORMAT_JS,
-        FORMAT_CSS,
-        FORMAT_XML,
-        FORMAT_HTML,
-        FORMAT_JSON,
-    } format;
-    if (!strcmp(format_str, "js")) {
+    else if (!strcmp(format_str, "js")) {
         format = FORMAT_JS;
     }
     else if (!strcmp(format_str, "css")) {
@@ -2167,7 +2309,11 @@ int main(int argc, const char *argv[])
     }
     else {
         fprintf(stderr, "Unsupported input format: %s\n", format_str);
-        print_usage();
+        print_usage = true;
+    }
+
+    if (print_usage) {
+        fputs("Usage: minify <css|js|xml|html|json> <input file|-> [--benchmark]\n", stderr);
         return EXIT_FAILURE;
     }
 

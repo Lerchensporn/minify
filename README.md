@@ -3,12 +3,14 @@
 This is a minifier for CSS, JavaScript, XML, HTML and JSON, written in C. It is
 designed according to the following requirements:
 
-- Released as single binary with no dependencies except libc.
+- Released as single binary with no dependencies except `libc`.
 
 - This tool is intended to be run by Makefile recipes to copy & minimize static assets from a
   `src/` folder to a `build/release/` folder. An additional debug make-target may omit the
   minification.  It is not envisioned to create bindings for scripting languages. Just use the
   command-line interface, or if really needed, usage via FFI should work fine.
+
+- Also minify inline CSS, JavaScript and JSON in HTML and XML documents.
 
 - Produce standard-conform output from any standard-conform input.
 
@@ -23,11 +25,15 @@ designed according to the following requirements:
 
    - Not removing empty CSS rules. Why would you have empty rules in the released code?
    - No merging of CSS properties.
+   - Not transforming e.g. a CSS value of `1000ms` to `1s`; it can be done in the source code.
    - Not removing doctypes or XML headers. They do have a meaning.
    - Minification of colors is a possible future objective because doing it in
      the source code can decrease its legibility.
-   - Mangling of JavaScript identifiers is a possible future objective.
    - Not collapsing boolean HTML attributes or omitting `type=text/javascript`.
+   - But mangling of JavaScript identifiers is a possible future objective.
+
+- I think I will not implement the generation of JavaScript source maps because
+  I don't see their strong benefit over reproducing issues in a debug build without minification.
 
 - Cleaning exported SVG files is better done with a cleaner such as `svgcleaner`.
   With default options, such cleaners substantially modify the markup
