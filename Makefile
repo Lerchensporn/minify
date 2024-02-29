@@ -27,14 +27,14 @@ test: release check
 
 .PHONY: check
 check:
-	cppcheck --enable=all --suppress=missingIncludeSystem minify.c
+	cppcheck --enable=all --suppress=missingIncludeSystem --check-level=exhaustive minify.c
 
 .PHONY: clean
 clean:
 	rm -rf build
 
 .PHONY: crossbuild
-cross:
+crossbuild:
 	docker run -v $$(pwd):/app -w /app -u $$(id -u):$$(id -g) multiarch/crossbuild sh -c ' \
 		CROSS_TRIPLE=x86_64-apple-darwin make; \
 		CROSS_TRIPLE=x86_64-w64-mingw32 make; \
