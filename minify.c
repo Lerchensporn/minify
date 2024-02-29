@@ -133,22 +133,6 @@ static int strnicmp(const char *s1, const char *s2, size_t length)
     return diff;
 }
 
-static bool css_is_nestable_atrule(const char *atrule, unsigned int atrule_length)
-{
-    return
-        sizeof "@media" - 1 == atrule_length &&
-        !strnicmp(atrule, "@media", atrule_length) ||
-
-        sizeof "@layer " - 1 == atrule_length &&
-        !strnicmp(atrule, "@layer", atrule_length) ||
-
-        sizeof "@container" - 1 == atrule_length &&
-        !strnicmp(atrule, "@container", atrule_length) ||
-
-        sizeof "@keyframes" - 1 == atrule_length &&
-        !strnicmp(atrule, "@keyframes", atrule_length);
-}
-
 struct Minification minify_css(const char *css)
 {
     struct Minification m = {0};
@@ -359,8 +343,20 @@ struct Minification minify_css(const char *css)
                 syntax_block = SYNTAX_BLOCK_STYLE;
             }
             else if (syntax_block == SYNTAX_BLOCK_ATRULE) {
-                syntax_block = css_is_nestable_atrule(atrule, atrule_length) ?
-                    SYNTAX_BLOCK_RULE_START : SYNTAX_BLOCK_STYLE;
+                bool is_nestable_atrule =
+                    sizeof "@media" - 1 == atrule_length &&
+                    !strnicmp(atrule, "@media", atrule_length) ||
+
+                    sizeof "@layer " - 1 == atrule_length &&
+                    !strnicmp(atrule, "@layer", atrule_length) ||
+
+                    sizeof "@container" - 1 == atrule_length &&
+                    !strnicmp(atrule, "@container", atrule_length) ||
+
+                    sizeof "@keyframes" - 1 == atrule_length &&
+                    !strnicmp(atrule, "@keyframes", atrule_length);
+
+                syntax_block = is_nestable_atrule ? SYNTAX_BLOCK_RULE_START : SYNTAX_BLOCK_STYLE;
             }
             continue;
         }
