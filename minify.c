@@ -717,6 +717,7 @@ struct Minification minify_js(const char *js)
             CURLY_BLOCK_FUNC_BODY,
             CURLY_BLOCK_FUNC_BODY_STANDALONE,
             CURLY_BLOCK_CONDITION_BODY,
+            CURLY_BLOCK_STRING_INTERPOLATION,
             CURLY_BLOCK_ARROWFUNC_BODY,
         } type;
         int do_nesting_level;
@@ -807,22 +808,6 @@ struct Minification minify_js(const char *js)
 
         // Next we handle keywords
 
-        /*if (next_word_length == sizeof "new" - 1 && !strncmp(&js[i], "new", next_word_length) {
-            k += next_word_length;
-            JS_SKIP_WHITESPACES_COMMENTS(js, &i, js_min, &js_min_length);
-
-
-            JS_SKIP_WHITESPACES_COMMENTS(js, &i, js_min, &js_min_length);
-
-            if (js[i] != '(') {
-                continue;
-            }
-            memcpy(&js_min[js_min_length], &js[i], next_word_length);
-            i += next_word_length;
-            js_min_length += next_word_length;
-            continue;
-        }
-        */
         if (next_word_length == sizeof "switch" - 1 && !strncmp(&js[i], "switch", next_word_length) ||
             next_word_length == sizeof "catch" - 1 && !strncmp(&js[i], "catch", next_word_length))
         {
@@ -1132,22 +1117,6 @@ struct Minification minify_js(const char *js)
             }
             continue;
         }
-        if (js[i] == '}') {
-            if (curly_blocks[curly_nesting_level].do_nesting_level != 0) {
-                m.error_position = i;
-                printf("%d\n", curly_blocks[curly_nesting_level].do_nesting_level);
-                asprintf(&m.result, "Unclosed `do` block before `}` in line %%d, %%d\n");
-                goto error;
-            }
-            if (--curly_nesting_level < 0) {
-                m.error_position = i;
-                asprintf(&m.result, "Unexpected `}` in line %%d, column %%d\n");
-                goto error;
-            }
-            js_min[js_min_length++] = '}';
-            i += 1;
-            continue;
-        }
         if (js[i] == ')') {
             if (round_blocks[round_nesting_level] != ROUND_BLOCK_PARAM_ARROWFUNC_SINGLE) {
                 js_min[js_min_length++] = ')';
@@ -1242,26 +1211,44 @@ struct Minification minify_js(const char *js)
             i += 1;
             continue;
         }
-        if (js[i] == '`' || js[i] == '"' || js[i] == '\'') {
+        if (js[i] == '`' || js[i] == '"' || js[i] == '\'' ||
+            js[i] == '}' && curly_blocks[curly_nesting_level].type == CURLY_BLOCK_STRING_INTERPOLATION)
+        {
+            if (js[i] == '}') {
+                curly_nesting_level -= 1;
+            }
             js_min[js_min_length++] = js[i];
         merge_strings:
             int quote_i = i;
             i += 1;
             bool active_backslash = false;
-            while (js[i] != '\0' && (js[i] != js[quote_i] || active_backslash)) {
+            while (js[i] != '\0') {
+                if (!active_backslash && js[i] == js[quote_i] && js[quote_i] != '}') {
+                    break;
+                }
+                if (!active_backslash && js[quote_i] == '}' && js[i] == '`') {
+                    break;
+                }
                 if (js[i] == '\n') {
                     if (active_backslash) {
                         i += 1;
                         js_min_length -= 1;
                         continue;
                     }
-                    else if (js[quote_i] != '`') {
+                    else if (js[quote_i] != '`' && js[quote_i] != '}') {
                         m.error_position = i;
                         asprintf(&m.result, "String contains unescaped line break in line %%d, column %%d\n");
                         goto error;
                     }
                 }
                 js_min[js_min_length++] = js[i];
+                if (!active_backslash && (js[quote_i] == '}' || js[quote_i] == '`') &&
+                    js[i - 1] == '$' && js[i] == '{')
+                {
+                    INCR_CURLY_NESTING_LEVEL;
+                    curly_blocks[curly_nesting_level].type = CURLY_BLOCK_STRING_INTERPOLATION;
+                    break;
+                }
                 if (i < quote_i + sizeof "</script" - 1 &&
                     !strnicmp(&js_min[js_min_length - sizeof "</script" + 1], "</script", sizeof "</script" - 1))
                 {
@@ -1270,7 +1257,14 @@ struct Minification minify_js(const char *js)
                 }
                 active_backslash = (js[i++] == '\\') * !active_backslash;
             }
-            if (js[i] != js[quote_i]) {
+            if (js[i] == '{') {
+                i += 1;
+                continue;
+            }
+            if (js[i] != js[quote_i] && !(js[quote_i] == '}' && js[i] == '`')) {
+                while (is_whitespace(js[i - 1])) {
+                    i -= 1;
+                }
                 m.error_position = i - 1;
                 asprintf(&m.result,
                     "Unexpected end of script, expected `%c` after line %%d, column %%d\n", js[quote_i]);
@@ -1280,13 +1274,13 @@ struct Minification minify_js(const char *js)
             int k = i;
             bool skipped_all_comments = JS_SKIP_WHITESPACES_COMMENTS(js, &k, NULL, NULL);
             if (!skipped_all_comments || js[k] != '+') {
-                js_min[js_min_length++] = js[quote_i];
+                js_min[js_min_length++] = js[quote_i] == '}' ? '`' : js[quote_i];
                 continue;
             }
             k += 1;
             skipped_all_comments = JS_SKIP_WHITESPACES_COMMENTS(js, &k, NULL, NULL);
-            if (!skipped_all_comments || js[k] != js[quote_i]) {
-                js_min[js_min_length++] = js[quote_i];
+            if (!skipped_all_comments || js[k] != js[quote_i] && (js[quote_i] != '}' || js[k] != '`')) {
+                js_min[js_min_length++] = js[quote_i] == '}' ? '`' : js[quote_i];
                 continue;
             }
 
@@ -1295,6 +1289,22 @@ struct Minification minify_js(const char *js)
             JS_SKIP_WHITESPACES_COMMENTS(js, &i, js_min, &js_min_length);
 
             goto merge_strings;
+        }
+        else if (js[i] == '}') {
+            if (curly_blocks[curly_nesting_level].do_nesting_level != 0) {
+                m.error_position = i;
+                printf("%d\n", curly_blocks[curly_nesting_level].do_nesting_level);
+                asprintf(&m.result, "Unclosed `do` block before `}` in line %%d, %%d\n");
+                goto error;
+            }
+            if (--curly_nesting_level < 0) {
+                m.error_position = i;
+                asprintf(&m.result, "Unexpected `}` in line %%d, column %%d\n");
+                goto error;
+            }
+            js_min[js_min_length++] = '}';
+            i += 1;
+            continue;
         }
         if (is_whitespace(js[i]) ||
             js[i] == '/' && js[i + 1] == '*' ||
@@ -1808,16 +1818,6 @@ static struct Minification minify_sgml(const char *sgml, enum SGMLSubset sgml_su
     int value_length, attribute_length;
 
     while (true) {
-        if (sgml[i] == '\0') {
-            if (syntax_block == SYNTAX_BLOCK_TAG) {
-                m.error_position = i;
-                asprintf(&m.result, "Unexpected end of document expected `>` after line %%d, column %%d\n");
-                goto error;
-            }
-            sgml_min[sgml_min_length] = '\0';
-            break;
-        }
-
         // Next we try to minify inline styles and scripts. We pass the current line and column to the
         // minification callback to make its error messages more precise. But what we can't correct
         // easily are offsets in line or column caused by XML entities.
@@ -1859,7 +1859,10 @@ static struct Minification minify_sgml(const char *sgml, enum SGMLSubset sgml_su
             bool in_cdata = false;
             while (true) {
                 if (sgml[i] == '\0') {
-                    m.error_position = i;
+                    do {
+                        i -= 1;
+                    } while (is_whitespace(sgml[i - 1]));
+                    m.error_position = i - 1;
                     asprintf(&m.result,
                         "Unexpected end of document, expected `%s>` after line %%d, column %%d\n",
                         tag_content_delimiter);
@@ -1894,7 +1897,7 @@ static struct Minification minify_sgml(const char *sgml, enum SGMLSubset sgml_su
             }
             if (sgml_subset == SGML_SUBSET_XML) {
                 m = sgml_decode(&sgml[content_start_i], i - content_start_i, SGML_SUBSET_XML);
-                if (m.result == NULL) {
+                if (m.result == NULL || m.result_is_error_message) {
                     m.error_position += content_start_i;
                     goto error;
                 }
@@ -1942,6 +1945,15 @@ static struct Minification minify_sgml(const char *sgml, enum SGMLSubset sgml_su
                                &sgml_min[sgml_min_length];
             free(m.result);
             continue;
+        }
+        if (sgml[i] == '\0') {
+            if (syntax_block == SYNTAX_BLOCK_TAG) {
+                m.error_position = i;
+                asprintf(&m.result, "Unexpected end of document expected `>` after line %%d, column %%d\n");
+                goto error;
+            }
+            sgml_min[sgml_min_length] = '\0';
+            break;
         }
         if (!strncmp(&sgml[i], "<!--", 4)) {
             int comment_start_i = i;

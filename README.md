@@ -2,8 +2,8 @@
 
 This is a minifier for CSS, JavaScript, XML, HTML and JSON, written in C. It can also minify inline
 scripts, stylesheets and JSON data inside XML and HTML markup. JSON input is validated completely;
-for the other formats, many but not all syntax errors are caught. Precise errors messages are
-printed in case when invalid input is recognized.
+for the other formats, many but not all classes of syntax errors are caught. Precise errors
+messages are printed when invalid input is recognized.
 
 It is designed according to the following requirements:
 

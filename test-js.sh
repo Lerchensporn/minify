@@ -17,6 +17,14 @@ assert()
 		exit 1
 	fi
 }
+input='`a\
+b`'
+expected='`ab`'
+assert "$expected" "$input"
+
+input='` a ${ 1 + ` 2 ` + 3 } c` + `d${a}}`'
+expected='` a ${1+` 2 `+3} cd${a}}`'
+assert "$expected" "$input"
 
 input='"</script>"'
 expected='"</script>"'
