@@ -1,7 +1,11 @@
 # Lerchensporn/minify
 
-This is a minifier for CSS, JavaScript, XML, HTML and JSON, written in C. It is
-designed according to the following requirements:
+This is a minifier for CSS, JavaScript, XML, HTML and JSON, written in C. It can also minify inline
+scripts, stylesheets and JSON data inside XML and HTML markup. JSON input is validated completely;
+for the other formats, many but not all syntax errors are caught. Precise errors messages are
+printed in case when invalid input is recognized.
+
+It is designed according to the following requirements:
 
 - Released as single binary with no dependencies except `libc`.
 
@@ -135,7 +139,11 @@ https://github.com/mishoo/UglifyJS
 
 https://swc.rs/playground
 
+Written in Rust, but still requires NodeJS dependencies.
+
 https://bun.sh/
+
+Shipped as a 91 MB big single executable.
 
 https://esbuild.github.io/
 

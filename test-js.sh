@@ -30,8 +30,20 @@ input=';if(0);'
 expected='if(0);'
 assert "$expected" "$input"
 
+input='do do do Math.sin(function(){do do;while(0);while(0);while(0);});while(0);while(0);while(0);while(0);'
+expected='do do do Math.sin(function(){do do;while(0)while(0)while(0);});while(0)while(0)while(0)while(0);'
+assert "$expected" "$input"
+
+input='do{ }while(0);'
+expected='do;while(0)'
+assert "$expected" "$input"
+
+input='do{a=3}while(0);'
+expected='do{a=3}while(0)'
+assert "$expected" "$input"
+
 input='do a=3;while(0);do!1;while(0);'
-expected='do a=3;while(0);do!1;while(0);'
+expected='do a=3;while(0)do!1;while(0)'
 assert "$expected" "$input"
 
 input='"a\\\nb\\\nc"'
