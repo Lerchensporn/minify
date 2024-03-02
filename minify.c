@@ -107,7 +107,7 @@ static bool skip_whitespaces_comments(struct Minification *m, const char *input,
     return skipped_all_comments;
 }
 
-static int strnicmp(const char *s1, const char *s2, size_t length)
+int strnicmp(const char *s1, const char *s2, size_t length)
 {
     int diff = 0;
     while (length--) {
@@ -1218,8 +1218,9 @@ struct Minification minify_js(const char *js)
                 curly_nesting_level -= 1;
             }
             js_min[js_min_length++] = js[i];
+            int quote_i;
         merge_strings:
-            int quote_i = i;
+            quote_i = i;
             i += 1;
             bool active_backslash = false;
             while (js[i] != '\0') {
@@ -1941,8 +1942,9 @@ static struct Minification minify_sgml(const char *sgml, enum SGMLSubset sgml_su
                     goto error;
                 }
             }
-            sgml_min_length += stpcpy(&sgml_min[sgml_min_length], m.result) -
-                               &sgml_min[sgml_min_length];
+            int result_length = strlen(m.result);
+            memcpy(&sgml_min[sgml_min_length], m.result, result_length);
+            sgml_min_length += result_length;
             free(m.result);
             continue;
         }

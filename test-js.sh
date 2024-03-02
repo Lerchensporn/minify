@@ -2,7 +2,7 @@
 
 assert()
 {
-	result="$(echo -e "$2" | ./build/native/minify js -)"
+	result="$(echo -e "$2" | ./build/minify js -)"
 	if [ "$?" != "0" ]; then
 		echo Crashed on:
 		echo "$2"

@@ -47,8 +47,8 @@ _main()
 {
     for file in test-js-libs/*.js; do
         printf '%s:\n   ' "$file"
-        build/native/minify js --benchmark $file || return
-        build/native/minify js $file | node -c || return
+        build/minify js --benchmark $file || return
+        build/minify js $file | node -c || return
     done
 }
 

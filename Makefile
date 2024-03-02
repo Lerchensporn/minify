@@ -1,21 +1,24 @@
-CROSS_TRIPLE ?= native
-build_dir = build/$(CROSS_TRIPLE)
+COMPILER ?= cc
+ifndef CROSS_TRIPLE
+	OUTPUT := minify
+else
+	OUTPUT := minify_$(CROSS_TRIPLE)
+endif
 
 .PHONY: build
-build: $(build_dir)/minify
+build: build/$(OUTPUT)
 
-$(build_dir)/minify: minify.c
-	mkdir -p $(build_dir)
-	cc -O2 -o $(build_dir)/minify minify.c
-	strip $(build_dir)/minify
+build/$(OUTPUT): minify.c
+	mkdir -p build
+	$(COMPILER) -O2 -o build/$(OUTPUT) minify.c
+	strip build/$(OUTPUT)
 
 .PHONY: debug
-debug: build/debug/minify
+debug: build/minify_debug
 
-build/debug/minify: minify.c
-	$(eval build_dir = build/debug)
-	mkdir -p $(build_dir)
-	cc --debug -o $(build_dir)/minify minify.c
+build/minify_debug: minify.c
+	mkdir -p build
+	cc --debug -o $(build)/minify minify.c
 
 .PHONY: test
 test: release check
@@ -35,7 +38,9 @@ clean:
 
 .PHONY: crossbuild
 crossbuild:
-	docker run -v $$(pwd):/app -w /app -u $$(id -u):$$(id -g) multiarch/crossbuild sh -c ' \
-		CROSS_TRIPLE=x86_64-apple-darwin make; \
-		CROSS_TRIPLE=x86_64-w64-mingw32 make; \
-	'
+	docker run -e CROSS_TRIPLE=x86_64-w64-mingw32 \
+		-v $$(pwd):/workdir -u $$(id -u):$$(id -g) multiarch/crossbuild make
+	docker run -e CROSS_TRIPLE=x86_64-apple-darwin \
+		-v $$(pwd):/workdir -u $$(id -u):$$(id -g) multiarch/crossbuild make
+	docker run -e CROSS_TRIPLE=x86_64-linux-gnu \
+		-v $$(pwd):/workdir -u $$(id -u):$$(id -g) multiarch/crossbuild make
