@@ -1362,7 +1362,7 @@ struct Minification minify_js(const char *js)
 
             if (has_line_break) {
                 // In JavaScript, `\n` can end a statement similar to `;`. We only remove `\n` when we are
-                // sure that it neither ends a statement nor is required as a white-space between keywords or
+                // sure that it neither ends a statement nor is required as a whitespace between keywords or
                 // identifiers. To keep this minifier simple, we accept to miss some occasions were `\n` can
                 // be removed.
                 //
@@ -1819,13 +1819,7 @@ static struct Minification minify_sgml(const char *sgml, enum SGMLSubset sgml_su
     int value_length, attribute_length;
 
     while (true) {
-        // Next we try to minify inline styles and scripts. We pass the current line and column to the
-        // minification callback to make its error messages more precise. But what we can't correct
-        // easily are offsets in line or column caused by XML entities.
-        //
-        // To solve this problem we would need to return the errorneous line & column and calculate
-        // correct the offset using an extra function:
-        // `correct_offset_created_by_xml_entities(&line, &column, undecoded_tag_content)`
+        // Beginning of inline minification
 
         const char *tag_content_delimiter = NULL;
         int tag_content_delimiter_length;
@@ -1948,6 +1942,9 @@ static struct Minification minify_sgml(const char *sgml, enum SGMLSubset sgml_su
             free(m.result);
             continue;
         }
+
+        // End of inline minification
+
         if (sgml[i] == '\0') {
             if (syntax_block == SYNTAX_BLOCK_TAG) {
                 m.error_position = i;
