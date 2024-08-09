@@ -10,7 +10,7 @@ build: build/$(OUTPUT)
 
 build/$(OUTPUT): minify.c
 	mkdir -p build
-	$(COMPILER) -O2 -o build/$(OUTPUT) minify.c
+	$(COMPILER) -O2 -Wall -Wno-parentheses -Wno-maybe-uninitialized -o build/$(OUTPUT) minify.c
 	strip build/$(OUTPUT)
 
 .PHONY: debug

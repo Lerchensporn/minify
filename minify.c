@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 static char *file_get_content(const char *filename)
 {
@@ -17,13 +18,13 @@ static char *file_get_content(const char *filename)
             return NULL;
         }
     }
-    int buffer_size = BUFSIZ;
+    size_t buffer_size = BUFSIZ;
     char *buffer = malloc(buffer_size);
     if (buffer == NULL) {
         fclose(fp);
         return NULL;
     }
-    int read = 0;
+    size_t read = 0;
     char *larger_buffer;
     do {
         read += fread(&buffer[read], 1, BUFSIZ, fp);
@@ -52,28 +53,28 @@ static bool is_whitespace(const char c)
 struct Minification
 {
     char *result;
-    int error_position;
+    size_t error_position;
     bool result_is_error_message;
 };
 
 enum CommentVariant {COMMENT_VARIANT_CSS, COMMENT_VARIANT_JS};
 
-static bool skip_whitespaces_comments(struct Minification *m, const char *input, int *i, char *min,
-    int *min_length, enum CommentVariant comment_variant)
+static bool skip_whitespaces_comments(struct Minification *m, const char *input, size_t *i, char *min,
+    size_t *min_length, enum CommentVariant comment_variant)
 {
     bool skipped_all_comments = true;
     do {
         while (is_whitespace(input[*i])) {
             *i += 1;
         }
-        int skipped_all_comments_start = -1;
+        const char *preserved_comment = NULL;
         if (input[*i] == '\0') {
             break;
         }
         else if (input[*i] == '/' && input[*i + 1] == '*') {
-            int comment_start = *i;
+            size_t comment_start = *i;
             if (input[*i + 2] == '!') {
-                skipped_all_comments_start = *i;
+                preserved_comment = &input[*i];
             }
             *i += 2;
             while (input[*i] != '\0' && (input[*i] != '*' || input[*i + 1] != '/')) {
@@ -81,7 +82,7 @@ static bool skip_whitespaces_comments(struct Minification *m, const char *input,
             }
             if (input[*i] == '\0') {
                 m->error_position = comment_start;
-                asprintf(&m->result, "Unclosed multi-line comment starting in line %%d, column %%d\n");
+                asprintf(&m->result, "Unclosed multi-line comment starting in line %%zu, column %%zu\n");
                 m->result_is_error_message = true;
                 return false;
             }
@@ -96,11 +97,11 @@ static bool skip_whitespaces_comments(struct Minification *m, const char *input,
         else {
             break;
         }
-        if (skipped_all_comments_start >= 0) {
+        if (preserved_comment != NULL) {
             skipped_all_comments = false;
             if (min != NULL) {
-                memcpy(&min[*min_length], &input[skipped_all_comments_start], *i - skipped_all_comments_start);
-                *min_length += *i - skipped_all_comments_start;
+                memcpy(&min[*min_length], preserved_comment, &input[*i] - preserved_comment);
+                *min_length += &input[*i] - preserved_comment;
             }
         }
     } while (true);
@@ -149,11 +150,11 @@ struct Minification minify_css(const char *css)
         SYNTAX_BLOCK_ATRULE_SQUARE_BRACKETS,
     } syntax_block = SYNTAX_BLOCK_RULE_START;
 
-    int css_min_length = 0;
+    size_t css_min_length = 0;
     const char *atrule = NULL;
-    int atrule_length;
-    int i = 0;
-    int nesting_level = -1;
+    size_t atrule_length;
+    size_t i = 0;
+    size_t nesting_level = 0;
 
     #define CSS_SKIP_WHITESPACES_COMMENTS(css, ptr_i, css_min, ptr_css_min_length) \
         skip_whitespaces_comments(&m, css, ptr_i, css_min, ptr_css_min_length, COMMENT_VARIANT_CSS); \
@@ -170,16 +171,16 @@ struct Minification minify_css(const char *css)
                 }
                 char *error;
                 if (syntax_block == SYNTAX_BLOCK_STYLE) {
-                    error = "Unexpected end of stylesheet, expected `}` after line %%d, column %%d\n";
+                    error = "Unexpected end of stylesheet, expected `}` after line %%zu, column %%zu\n";
                 }
                 else if (syntax_block == SYNTAX_BLOCK_QRULE) {
-                    error = "Unexpected end of stylesheet, expected `{…}` after line %%d, column %%d\n";
+                    error = "Unexpected end of stylesheet, expected `{…}` after line %%zu, column %%zu\n";
                 }
                 else if (syntax_block == SYNTAX_BLOCK_ATRULE) {
-                    error = "Unexpected end of stylesheet, expected `;` or `{…}` after line %%d, column %%d\n";
+                    error = "Unexpected end of stylesheet, expected `;` or `{…}` after line %%zu, column %%zu\n";
                 }
                 else {
-                    error = "Unexpected end of stylesheet after line %%d, column %%d\n";
+                    error = "Unexpected end of stylesheet after line %%zu, column %%zu\n";
                 }
                 m.error_position = i - 1;
                 asprintf(&m.result, error);
@@ -190,9 +191,9 @@ struct Minification minify_css(const char *css)
         }
         if (css[i] == '}') {
             do {
-                if (nesting_level == -1) {
+                if (nesting_level == 0) {
                     m.error_position = i;
-                    asprintf(&m.result, "Unexpected `}` in line %%d, column %%d\n");
+                    asprintf(&m.result, "Unexpected `}` in line %%zu, column %%zu\n");
                     goto error;
                 }
                 css_min[css_min_length++] = '}';
@@ -206,7 +207,7 @@ struct Minification minify_css(const char *css)
         if (syntax_block == SYNTAX_BLOCK_RULE_START) {
             if (css[i] == '{' || css[i] == '}' || css[i] == '"' || css[i] == '\'') {
                 m.error_position = i;
-                asprintf(&m.result, "Unexpected `%c` in line %%d, column %%d\n", css[i]);
+                asprintf(&m.result, "Unexpected `%c` in line %%zu, column %%zu\n", css[i]);
                 goto error;
             }
             css_min[css_min_length++] = css[i];
@@ -234,7 +235,7 @@ struct Minification minify_css(const char *css)
                 i += 1;
             }
             if (css[i] == '"' || css[i] == '\'') {
-                int quot_start_i = i;
+                size_t quote_start_i = i;
                 char quot = css[i];
                 bool active_backslash = false;
                 do {
@@ -243,8 +244,8 @@ struct Minification minify_css(const char *css)
                     i += 1;
                 } while ((css[i] != quot || active_backslash) && css[i] != '\0');
                 if (css[i] == '\0') {
-                    m.error_position = quot_start_i;
-                    asprintf(&m.result, "Unclosed string starting in line %%d, column %%d\n");
+                    m.error_position = quote_start_i;
+                    asprintf(&m.result, "Unclosed string starting in line %%zu, column %%zu\n");
                     goto error;
                 }
                 css_min[css_min_length++] = quot;
@@ -254,7 +255,7 @@ struct Minification minify_css(const char *css)
                 }
                 if (css[i] != ')') {
                     m.error_position = i;
-                    asprintf(&m.result, "Expected `)` in line %%d, column %%d\n");
+                    asprintf(&m.result, "Expected `)` in line %%zu, column %%zu\n");
                     goto error;
                 }
             }
@@ -267,16 +268,15 @@ struct Minification minify_css(const char *css)
                     i += 1;
                 }
                 if (css[i] != ')') {
-                    free(css_min);
                     if (css[i] == '\0') {
                         m.error_position = i;
                         asprintf(&m.result,
-                            "Unexpected end of stylesheet, expected `)` in line %%d, column %%d\n");
+                            "Unexpected end of stylesheet, expected `)` in line %%zu, column %%zu\n");
                         goto error;
                     }
                     else if (is_whitespace(css[i - 1])) {
                         m.error_position = i;
-                        asprintf(&m.result, "Illegal whitespace in URL in line %%d, column %%d\n");
+                        asprintf(&m.result, "Illegal whitespace in URL in line %%zu, column %%zu\n");
                         goto error;
                     }
                 }
@@ -298,7 +298,7 @@ struct Minification minify_css(const char *css)
             continue;
         }
         if (css[i] == '"' || css[i] == '\'') {
-            int quote_start_i = i;
+            size_t quote_start_i = i;
             css_min[css_min_length++] = css[i++];
             bool active_backslash = false;
             while (css[i] != '\0' && (css[i] != css[quote_start_i] || active_backslash)) {
@@ -308,7 +308,7 @@ struct Minification minify_css(const char *css)
             }
             if (css[i] == '\0') {
                 m.error_position = quote_start_i;
-                asprintf(&m.result, "Unclosed string starting in line %%d, column %%d\n");
+                asprintf(&m.result, "Unclosed string starting in line %%zu, column %%zu\n");
                 goto error;
             }
             css_min[css_min_length++] = css[quote_start_i];
@@ -332,7 +332,7 @@ struct Minification minify_css(const char *css)
             nesting_level += 1;
             if (syntax_block == SYNTAX_BLOCK_STYLE)  {
                 m.error_position = i;
-                asprintf(&m.result, "Unexpected `{` in line %%d, column %%d\n");
+                asprintf(&m.result, "Unexpected `{` in line %%zu, column %%zu\n");
                 goto error;
             }
             css_min[css_min_length++] = '{';
@@ -436,7 +436,7 @@ struct Minification minify_css(const char *css)
                 }
             }
             else if (syntax_block == SYNTAX_BLOCK_ATRULE) {
-                int before_whitespace = i;
+                size_t before_whitespace = i;
                 CSS_SKIP_WHITESPACES_COMMENTS(css, &i, css_min, &css_min_length);
 
                 // Removing whitespace before `(` in `@media (...){}` but not in `@media all and (...){}`
@@ -488,13 +488,13 @@ struct Minification minify_json(const char *json)
     if (json_min == NULL) {
         return m;
     }
-    int bracket_types_capacity = 512;
+    size_t bracket_types_capacity = 512;
     char *bracket_types = malloc(bracket_types_capacity * sizeof (char));
     if (bracket_types == NULL) {
         goto error;
     }
-    int nesting_level = -1;
-    int json_min_length = 0, i = 0;
+    size_t nesting_level = 0;
+    size_t json_min_length = 0, i = 0;
     while (true) {
         while (is_whitespace(json[i])) {
             i += 1;
@@ -505,11 +505,11 @@ struct Minification minify_json(const char *json)
         }
         if ((json[i] == ',' || json[i] == '}') && json_min[json_min_length - 1] == ':') {
             m.error_position = i;
-            asprintf(&m.result, "No value after `:` in line %%d, column %%d\n");
+            asprintf(&m.result, "No value after `:` in line %%zu, column %%zu\n");
             goto error;
         }
         if (json[i] == '[' || json[i] == '{') {
-            if (++nesting_level == bracket_types_capacity) {
+            if (++nesting_level > bracket_types_capacity) {
                 bracket_types_capacity += 512;
                 char *bracket_types_realloc = realloc(bracket_types, bracket_types_capacity * sizeof (char));
                 if (bracket_types_realloc == NULL) {
@@ -517,7 +517,7 @@ struct Minification minify_json(const char *json)
                 }
                 bracket_types = bracket_types_realloc;
             }
-            bracket_types[nesting_level] = json[i];
+            bracket_types[nesting_level - 1] = json[i];
             json_min[json_min_length++] = json[i];
             i += 1;
             continue;
@@ -525,12 +525,12 @@ struct Minification minify_json(const char *json)
         if (json[i] == ']' || json[i] == '}') {
             if (json_min[json_min_length - 1] == ',') {
                 m.error_position = i;
-                asprintf(&m.result, "Illegal `,` before bracket in line %%d, column %%d\n");
+                asprintf(&m.result, "Illegal `,` before bracket in line %%zu, column %%zu\n");
                 goto error;
             }
-            if (nesting_level == -1 || bracket_types[nesting_level] != json[i] - 2) {
+            if (nesting_level == 0 || bracket_types[nesting_level - 1] != json[i] - 2) {
                 m.error_position = i;
-                asprintf(&m.result, "Unexpected `%c` in line %%d, column %%d\n", json[i]);
+                asprintf(&m.result, "Unexpected `%c` in line %%zu, column %%zu\n", json[i]);
                 goto error;
             }
             nesting_level -= 1;
@@ -539,7 +539,7 @@ struct Minification minify_json(const char *json)
             continue;
         }
 
-        bool is_key = nesting_level >= 0 && (bracket_types[nesting_level] == '{' &&
+        bool is_key = nesting_level > 0 && (bracket_types[nesting_level - 1] == '{' &&
             (json_min[json_min_length - 1] == ',' || json_min[json_min_length - 1] == '{'));
 
         if (json[i] == '"') {
@@ -549,19 +549,19 @@ struct Minification minify_json(const char *json)
             while (json[i] != '\0' && (json[i] != '"' || active_backslash)) {
                 if (json[i] == '\n') {
                     m.error_position = i - 1;
-                    asprintf(&m.result, "Illegal line break in JSON string after line %d\n");
+                    asprintf(&m.result, "Illegal line break in JSON string after line %%zu\n");
                     goto error;
                 }
                 active_backslash = (json[i] == '\\') * !active_backslash;
                 if (active_backslash && strchr("\"\\/bfnrtu", json[i + 1]) == NULL) {
                     m.error_position = i;
-                    asprintf(&m.result, "Invalid JSON escape sequence `\\%c` in line %%d, column %%d\n",
+                    asprintf(&m.result, "Invalid JSON escape sequence `\\%c` in line %%zu, column %%zu\n",
                         json[i + 1]);
                     goto error;
                 }
                 if (active_backslash && json[i + 1] == 'u') {
                     bool invalid_unicode = false;
-                    int k;
+                    size_t k;
                     for (k = i + 2; k <= i + 5; ++k) {
                         if (!(
                             (json[k] >= '0' && json[k] <= '9') || json[k] >= 'a' && json[k] <= 'f' ||
@@ -575,8 +575,8 @@ struct Minification minify_json(const char *json)
                     }
                     if (invalid_unicode) {
                         m.error_position = i - 1;
-                        asprintf(&m.result, "Invalid JSON escape sequence `%.*s` in line %%d, column %%d\n",
-                            k - i, &json[i]);
+                        asprintf(&m.result, "Invalid JSON escape sequence `%.*s` in line %%zu, column %%zu\n",
+                            (int) (k - i), &json[i]);
                         goto error;
                     }
                 }
@@ -585,7 +585,7 @@ struct Minification minify_json(const char *json)
             }
             if (json[i] == '\0') {
                 m.error_position = i - 1;
-                asprintf(&m.result, "Unexpected end of JSON document, expected `\"` after line %%d, column %%d\n");
+                asprintf(&m.result, "Unexpected end of JSON document, expected `\"` after line %%zu, column %%zu\n");
                 goto error;
             }
             json_min[json_min_length++] = '"';
@@ -598,7 +598,7 @@ struct Minification minify_json(const char *json)
             }
             if (json[i] != ':') {
                 m.error_position = i;
-                asprintf(&m.result, "Expected `:` instead of `%c` in line %%d, column %%d\n", json[i]);
+                asprintf(&m.result, "Expected `:` instead of `%c` in line %%zu, column %%zu\n", json[i]);
                 goto error;
             }
             json_min[json_min_length++] = ':';
@@ -608,7 +608,7 @@ struct Minification minify_json(const char *json)
 
         if (is_key) {
             m.error_position = i;
-            asprintf(&m.result, "Expected `\"`, `[` or `{` instead of `%c` in line %%d, column %%d\n",
+            asprintf(&m.result, "Expected `\"`, `[` or `{` instead of `%c` in line %%zu, column %%zu\n",
                 json[i]);
             goto error;
         }
@@ -638,7 +638,7 @@ struct Minification minify_json(const char *json)
             continue;
         }
         if (json[i] >= '0' && json[i] <= '9') {
-            int k = i;
+            size_t k = i;
             while (json[k] >= '0' && json[k] <= '9') {
                 k += 1;
             }
@@ -661,23 +661,23 @@ struct Minification minify_json(const char *json)
             i = k;
             continue;
         }
-        if (nesting_level >= 0 && json[i] == ',' && json_min[json_min_length - 1] != ',') {
+        if (nesting_level > 0 && json[i] == ',' && json_min[json_min_length - 1] != ',') {
             json_min[json_min_length++] = ',';
             i += 1;
             continue;
         }
         if (json[i] != '\0' && !is_whitespace(json[i])) {
             m.error_position = i;
-            asprintf(&m.result, "Unexpected data starting with `%c` in line %%d, column %%d\n", json[i]);
+            asprintf(&m.result, "Unexpected data starting with `%c` in line %%zu, column %%zu\n", json[i]);
             goto error;
         }
     }
-    if (nesting_level != -1) {
+    if (nesting_level != 0) {
         do {
             i -= 1;
         } while (is_whitespace(json[i]));
         m.error_position = i;
-        asprintf(&m.result, "Missing `%c` after line %%d, column %%d\n", bracket_types[nesting_level]);
+        asprintf(&m.result, "Missing `%c` after line %%zu, column %%zu\n", bracket_types[nesting_level - 1]);
         goto error;
     }
     m.result = realloc(json_min, json_min_length + 1);
@@ -701,15 +701,16 @@ struct Minification minify_js(const char *js)
     if (js_min == NULL) {
         return m;
     }
-    int js_min_length = 0;
-    int i = 0;
-    int last_open_curly_bracket_i, last_open_round_bracket_i;
+    size_t js_min_length = 0;
+    size_t i = 0;
+    size_t last_open_curly_bracket_i, last_open_round_bracket_i;
 
     const char *identifier_delimiters = "'\"`%<>+*/-=,(){}[]!~;|&^:? \t\r\n";
 
-    int curly_blocks_capacity = 64;
+    size_t curly_blocks_capacity = 64;
     struct CurlyBlock {
         enum {
+            CURLY_BLOCK_GLOBAL, // Needed to track do_nesting_level
             CURLY_BLOCK_UNKNOWN,
             CURLY_BLOCK_DO,
             CURLY_BLOCK_TRY_FINALLY,
@@ -720,18 +721,17 @@ struct Minification minify_js(const char *js)
             CURLY_BLOCK_STRING_INTERPOLATION,
             CURLY_BLOCK_ARROWFUNC_BODY,
         } type;
-        int do_nesting_level;
+        size_t do_nesting_level;
     }
     *curly_blocks = malloc(curly_blocks_capacity * sizeof (struct CurlyBlock));
     if (curly_blocks == NULL) {
         free(js_min);
         return m;
     }
-    curly_blocks[0].type = CURLY_BLOCK_UNKNOWN;
-    curly_blocks[0].do_nesting_level = 0;
-    int curly_nesting_level = 0;
+    curly_blocks[0] = (struct CurlyBlock) {CURLY_BLOCK_GLOBAL, 0};
+    size_t curly_nesting_level = 1;
 
-    int round_blocks_capacity = 64;
+    size_t round_blocks_capacity = 64;
     enum RoundBlockType {
         ROUND_BLOCK_DO_WHILE,
         ROUND_BLOCK_PREFIXED_CONDITION,
@@ -747,7 +747,7 @@ struct Minification minify_js(const char *js)
         free(curly_blocks);
         return m;
     }
-    int round_nesting_level = -1;
+    size_t round_nesting_level = 0;
 
     #define JS_SKIP_WHITESPACES_COMMENTS(js, ptr_i, js_min, ptr_js_min_length) \
         skip_whitespaces_comments(&m, js, ptr_i, js_min, ptr_js_min_length, COMMENT_VARIANT_JS); \
@@ -756,8 +756,7 @@ struct Minification minify_js(const char *js)
         }
 
     #define INCR_CURLY_NESTING_LEVEL \
-        curly_blocks[curly_nesting_level + 1].do_nesting_level = 0; \
-        if (++curly_nesting_level == curly_blocks_capacity) { \
+        if (++curly_nesting_level > curly_blocks_capacity) { \
             curly_blocks_capacity += 512; \
             struct CurlyBlock *curly_blocks_realloc = realloc( \
                 curly_blocks, curly_blocks_capacity * sizeof (struct CurlyBlock) \
@@ -767,10 +766,11 @@ struct Minification minify_js(const char *js)
             } \
             curly_blocks = curly_blocks_realloc; \
         } \
+        curly_blocks[curly_nesting_level - 1].do_nesting_level = 0; \
         last_open_curly_bracket_i = i;
 
     #define INCR_ROUND_NESTING_LEVEL \
-        if (++round_nesting_level == round_blocks_capacity) { \
+        if (++round_nesting_level > round_blocks_capacity) { \
             round_blocks_capacity += 512; \
             enum RoundBlockType *round_blocks_realloc = realloc( \
                 round_blocks, round_blocks_capacity * sizeof (enum RoundBlockType) \
@@ -788,7 +788,7 @@ struct Minification minify_js(const char *js)
             break;
         }
 
-        int next_word_length = strcspn(&js[i], identifier_delimiters);
+        size_t next_word_length = strcspn(&js[i], identifier_delimiters);
         if (next_word_length == 0) {
             goto after_keywords;
         }
@@ -796,7 +796,7 @@ struct Minification minify_js(const char *js)
         // Keywords lose their meaning when used as object keys
 
         {
-            int k = i + next_word_length;
+            size_t k = i + next_word_length;
             JS_SKIP_WHITESPACES_COMMENTS(js, &k, NULL, NULL);
             if (js[k] == ':') {
                 memcpy(&js_min[js_min_length], &js[i], next_word_length);
@@ -818,19 +818,19 @@ struct Minification minify_js(const char *js)
             JS_SKIP_WHITESPACES_COMMENTS(js, &i, js_min, &js_min_length);
             if (js[i] == '(') {
                 INCR_ROUND_NESTING_LEVEL;
-                round_blocks[round_nesting_level] = ROUND_BLOCK_CATCH_SWITCH;
+                round_blocks[round_nesting_level - 1] = ROUND_BLOCK_CATCH_SWITCH;
                 js_min[js_min_length++] = '(';
                 i += 1;
             }
             else if (js[i] == '{') {
                 INCR_CURLY_NESTING_LEVEL;
-                curly_blocks[curly_nesting_level].type = CURLY_BLOCK_CONDITION_BODY;
+                curly_blocks[curly_nesting_level - 1].type = CURLY_BLOCK_CONDITION_BODY;
                 js_min[js_min_length++] = '{';
                 i += 1;
             }
             else {
                 m.error_position = i;
-                asprintf(&m.result, "Expected `(` or `{` in line %%d, column %%d\n");
+                asprintf(&m.result, "Expected `(` or `{` in line %%zu, column %%zu\n");
                 goto error;
             }
             continue;
@@ -841,16 +841,16 @@ struct Minification minify_js(const char *js)
             i += next_word_length;
             JS_SKIP_WHITESPACES_COMMENTS(js, &i, js_min, &js_min_length);
             if (js[i] == '{') {
-                int k = i + 1;
+                size_t k = i + 1;
                 bool skipped_all_comments = JS_SKIP_WHITESPACES_COMMENTS(js, &k, NULL, NULL);
                 if (skipped_all_comments && js[k] == '}') {
-                    curly_blocks[curly_nesting_level].do_nesting_level += 1;
+                    curly_blocks[curly_nesting_level - 1].do_nesting_level += 1;
                     js_min[js_min_length++] = ';';
                     i = k + 1;
                     continue;
                 }
                 INCR_CURLY_NESTING_LEVEL;
-                curly_blocks[curly_nesting_level].type = CURLY_BLOCK_DO;
+                curly_blocks[curly_nesting_level - 1].type = CURLY_BLOCK_DO;
                 js_min[js_min_length++] = '{';
                 i += 1;
                 continue;
@@ -858,7 +858,7 @@ struct Minification minify_js(const char *js)
             if (strchr(identifier_delimiters, js[i]) == NULL) {
                 js_min[js_min_length++] = ' ';
             }
-            curly_blocks[curly_nesting_level].do_nesting_level += 1;
+            curly_blocks[curly_nesting_level - 1].do_nesting_level += 1;
             continue;
         }
         if (
@@ -872,11 +872,11 @@ struct Minification minify_js(const char *js)
             JS_SKIP_WHITESPACES_COMMENTS(js, &i, js_min, &js_min_length);
             if (js[i] != '{') {
                 m.error_position = i;
-                asprintf(&m.result, "Expected `{` in line %%d, column %%d\n");
+                asprintf(&m.result, "Expected `{` in line %%zu, column %%zu\n");
                 goto error;
             }
             INCR_CURLY_NESTING_LEVEL;
-            curly_blocks[curly_nesting_level].type = CURLY_BLOCK_TRY_FINALLY;
+            curly_blocks[curly_nesting_level - 1].type = CURLY_BLOCK_TRY_FINALLY;
             js_min[js_min_length++] = '{';
             i += 1;
             continue;
@@ -917,11 +917,11 @@ struct Minification minify_js(const char *js)
             JS_SKIP_WHITESPACES_COMMENTS(js, &i, js_min, &js_min_length);
             if (js[i] != '(') {
                 m.error_position = i;
-                asprintf(&m.result, "Expected `(` in line %%d, column %%d\n");
+                asprintf(&m.result, "Expected `(` in line %%zu, column %%zu\n");
                 goto error;
             }
             INCR_ROUND_NESTING_LEVEL;
-            round_blocks[round_nesting_level] = standalone ? ROUND_BLOCK_PARAM_STANDALONE : ROUND_BLOCK_PARAM;
+            round_blocks[round_nesting_level - 1] = standalone ? ROUND_BLOCK_PARAM_STANDALONE : ROUND_BLOCK_PARAM;
             js_min[js_min_length++] = '(';
             i += 1;
             continue;
@@ -934,19 +934,19 @@ struct Minification minify_js(const char *js)
             JS_SKIP_WHITESPACES_COMMENTS(js, &i, js_min, &js_min_length);
             if (js[i] != '(') {
                 m.error_position = i;
-                asprintf(&m.result, "Expected `(` in line %%d, column %%d\n");
+                asprintf(&m.result, "Expected `(` in line %%zu, column %%zu\n");
                 goto error;
             }
             INCR_ROUND_NESTING_LEVEL;
-            if (curly_bracket_before_while && curly_blocks[curly_nesting_level + 1].type == CURLY_BLOCK_DO) {
-                round_blocks[round_nesting_level] = ROUND_BLOCK_DO_WHILE;
+            if (curly_bracket_before_while && curly_blocks[curly_nesting_level].type == CURLY_BLOCK_DO) {
+                round_blocks[round_nesting_level - 1] = ROUND_BLOCK_DO_WHILE;
             }
-            else if (curly_blocks[curly_nesting_level].do_nesting_level > 0) {
-                curly_blocks[curly_nesting_level].do_nesting_level -= 1;
-                round_blocks[round_nesting_level] = ROUND_BLOCK_DO_WHILE;
+            else if (curly_blocks[curly_nesting_level - 1].do_nesting_level > 0) {
+                curly_blocks[curly_nesting_level - 1].do_nesting_level -= 1;
+                round_blocks[round_nesting_level - 1] = ROUND_BLOCK_DO_WHILE;
             }
             else {
-                round_blocks[round_nesting_level] = ROUND_BLOCK_PREFIXED_CONDITION;
+                round_blocks[round_nesting_level - 1] = ROUND_BLOCK_PREFIXED_CONDITION;
             }
             js_min[js_min_length++] = '(';
             i += 1;
@@ -962,11 +962,11 @@ struct Minification minify_js(const char *js)
             JS_SKIP_WHITESPACES_COMMENTS(js, &i, js_min, &js_min_length);
             if (js[i] != '(') {
                 m.error_position = i;
-                asprintf(&m.result, "Expected `(` in line %%d, column %%d\n");
+                asprintf(&m.result, "Expected `(` in line %%zu, column %%zu\n");
                 goto error;
             }
             INCR_ROUND_NESTING_LEVEL;
-            round_blocks[round_nesting_level] = ROUND_BLOCK_PREFIXED_CONDITION;
+            round_blocks[round_nesting_level - 1] = ROUND_BLOCK_PREFIXED_CONDITION;
             js_min[js_min_length++] = '(';
             i += 1;
             continue;
@@ -975,7 +975,7 @@ struct Minification minify_js(const char *js)
             memcpy(&js_min[js_min_length], &js[i], next_word_length);
             js_min_length += next_word_length;
             i += next_word_length;
-            int k = i;
+            size_t k = i;
             JS_SKIP_WHITESPACES_COMMENTS(js, &k, NULL, NULL);
             if (js[k] != '{') {
                 continue;
@@ -995,7 +995,7 @@ struct Minification minify_js(const char *js)
             else {
                 INCR_CURLY_NESTING_LEVEL;
                 js_min[js_min_length++] = '{';
-                curly_blocks[curly_nesting_level].type = CURLY_BLOCK_CONDITION_BODY;
+                curly_blocks[curly_nesting_level - 1].type = CURLY_BLOCK_CONDITION_BODY;
             }
             continue;
         }
@@ -1028,7 +1028,7 @@ struct Minification minify_js(const char *js)
             INCR_CURLY_NESTING_LEVEL;
             i += 1;
             if (js_min_length > 0 && js_min[js_min_length - 1] == ')' &&
-                round_blocks[round_nesting_level + 1] == ROUND_BLOCK_PREFIXED_CONDITION)
+                round_blocks[round_nesting_level] == ROUND_BLOCK_PREFIXED_CONDITION)
             {
                 // Replacing `if(1){}` by `if(1);`
                 bool skipped_all_comments = JS_SKIP_WHITESPACES_COMMENTS(js, &i, js_min, &js_min_length);
@@ -1042,28 +1042,28 @@ struct Minification minify_js(const char *js)
                     continue;
                 }
                 else {
-                    curly_blocks[curly_nesting_level].type = CURLY_BLOCK_CONDITION_BODY;
+                    curly_blocks[curly_nesting_level - 1].type = CURLY_BLOCK_CONDITION_BODY;
                 }
             }
             else if (js_min_length >= 1 && js_min[js_min_length - 1] == ')' &&
-                     round_blocks[round_nesting_level + 1] == ROUND_BLOCK_CATCH_SWITCH)
+                     round_blocks[round_nesting_level] == ROUND_BLOCK_CATCH_SWITCH)
             {
-                curly_blocks[curly_nesting_level].type = CURLY_BLOCK_CONDITION_BODY;
+                curly_blocks[curly_nesting_level - 1].type = CURLY_BLOCK_CONDITION_BODY;
             }
             else if (js_min_length >= 2 &&
                      js_min[js_min_length - 2] == '=' && js_min[js_min_length - 1] == '>')
             {
-                curly_blocks[curly_nesting_level].type = CURLY_BLOCK_ARROWFUNC_BODY;
+                curly_blocks[curly_nesting_level - 1].type = CURLY_BLOCK_ARROWFUNC_BODY;
             }
             else if (js_min_length >= 1 && js_min[js_min_length - 1] == ')' &&
-                     round_blocks[round_nesting_level + 1] == ROUND_BLOCK_PARAM)
+                     round_blocks[round_nesting_level] == ROUND_BLOCK_PARAM)
             {
-                curly_blocks[curly_nesting_level].type = CURLY_BLOCK_FUNC_BODY;
+                curly_blocks[curly_nesting_level - 1].type = CURLY_BLOCK_FUNC_BODY;
             }
             else if (js_min_length >= 1 && js_min[js_min_length - 1] == ')' &&
-                     round_blocks[round_nesting_level + 1] == ROUND_BLOCK_PARAM_STANDALONE)
+                     round_blocks[round_nesting_level] == ROUND_BLOCK_PARAM_STANDALONE)
             {
-                curly_blocks[curly_nesting_level].type = CURLY_BLOCK_FUNC_BODY_STANDALONE;
+                curly_blocks[curly_nesting_level - 1].type = CURLY_BLOCK_FUNC_BODY_STANDALONE;
             }
             else if (
                 js_min_length >= 1 &&
@@ -1074,10 +1074,10 @@ struct Minification minify_js(const char *js)
                     js_min[js_min_length - 1] == '\n'
                 )
             ) {
-                curly_blocks[curly_nesting_level].type = CURLY_BLOCK_STANDALONE;
+                curly_blocks[curly_nesting_level - 1].type = CURLY_BLOCK_STANDALONE;
             }
             else {
-                curly_blocks[curly_nesting_level].type = CURLY_BLOCK_UNKNOWN;
+                curly_blocks[curly_nesting_level - 1].type = CURLY_BLOCK_UNKNOWN;
             }
             js_min[js_min_length++] = '{';
             continue;
@@ -1091,10 +1091,10 @@ struct Minification minify_js(const char *js)
 
             bool remove_round_brackets_around_param = false;
 
-            int k = i;
+            size_t k = i;
             JS_SKIP_WHITESPACES_COMMENTS(js, &k, NULL, NULL);
             if (js[k] != '.') { // Can't remove round brackets in `(...arg)=>{}`
-                int arg_start = k;
+                size_t arg_start = k;
                 while (strchr(identifier_delimiters, js[k]) == NULL) {
                     k += 1;
                 }
@@ -1109,21 +1109,21 @@ struct Minification minify_js(const char *js)
             }
 
             if (remove_round_brackets_around_param) {
-                round_blocks[round_nesting_level] = ROUND_BLOCK_PARAM_ARROWFUNC_SINGLE;
+                round_blocks[round_nesting_level - 1] = ROUND_BLOCK_PARAM_ARROWFUNC_SINGLE;
             }
             else {
-                round_blocks[round_nesting_level] = ROUND_BLOCK_UNKNOWN;
+                round_blocks[round_nesting_level - 1] = ROUND_BLOCK_UNKNOWN;
                 js_min[js_min_length++] = '(';
             }
             continue;
         }
         if (js[i] == ')') {
-            if (round_blocks[round_nesting_level] != ROUND_BLOCK_PARAM_ARROWFUNC_SINGLE) {
+            if (round_blocks[round_nesting_level - 1] != ROUND_BLOCK_PARAM_ARROWFUNC_SINGLE) {
                 js_min[js_min_length++] = ')';
             }
-            if (--round_nesting_level < -1) {
+            if (round_nesting_level-- == 0) {
                 m.error_position = i;
-                asprintf(&m.result, "Unexpected `)` in line %%d, column %%d\n");
+                asprintf(&m.result, "Unexpected `)` in line %%zu, column %%zu\n");
                 goto error;
             }
             i += 1;
@@ -1134,7 +1134,7 @@ struct Minification minify_js(const char *js)
                 i += 1;
                 continue;
             }
-            if (round_nesting_level >= 0 && round_blocks[round_nesting_level] == ROUND_BLOCK_PREFIXED_CONDITION) {
+            if (round_nesting_level > 0 && round_blocks[round_nesting_level - 1] == ROUND_BLOCK_PREFIXED_CONDITION) {
                 // Do not remove `;` in `for(;;i++){…}`
                 js_min[js_min_length++] = ';';
                 i += 1;
@@ -1153,7 +1153,7 @@ struct Minification minify_js(const char *js)
                 (js[i] == '\0' || js[i] == '}') &&
                 !(
                     before_semicolon == ')' &&
-                    round_blocks[round_nesting_level + 1] == ROUND_BLOCK_PREFIXED_CONDITION
+                    round_blocks[round_nesting_level] == ROUND_BLOCK_PREFIXED_CONDITION
                 )
             ) {
                 continue;
@@ -1162,14 +1162,14 @@ struct Minification minify_js(const char *js)
             if (
                 before_semicolon == '}' &&
                 (
-                    curly_blocks[curly_nesting_level + 1].type == CURLY_BLOCK_FUNC_BODY_STANDALONE ||
-                    curly_blocks[curly_nesting_level + 1].type == CURLY_BLOCK_STANDALONE
+                    curly_blocks[curly_nesting_level].type == CURLY_BLOCK_FUNC_BODY_STANDALONE ||
+                    curly_blocks[curly_nesting_level].type == CURLY_BLOCK_STANDALONE
                 )
             ) {
                 continue;
             }
 
-            if (before_semicolon == ')' && round_blocks[round_nesting_level + 1] == ROUND_BLOCK_DO_WHILE) {
+            if (before_semicolon == ')' && round_blocks[round_nesting_level] == ROUND_BLOCK_DO_WHILE) {
                 continue;
             }
 
@@ -1182,7 +1182,7 @@ struct Minification minify_js(const char *js)
         {
             // This is a regex object.
 
-            int regex_start_i = i;
+            size_t regex_start_i = i;
             js_min[js_min_length++] = '/';
             i += 1;
             bool active_backslash = false;
@@ -1190,7 +1190,7 @@ struct Minification minify_js(const char *js)
             while (js[i] != '\0' && (js[i] != '/' || active_backslash || in_angular_brackets)) {
                 if (js[i] == '\n') {
                     m.error_position = i - 1;
-                    asprintf(&m.result, "Illegal line break in regex at the end of line %d\n");
+                    asprintf(&m.result, "Illegal line break in regex at the end of line %%zu\n");
                     goto error;
                 }
                 js_min[js_min_length++] = js[i];
@@ -1200,11 +1200,11 @@ struct Minification minify_js(const char *js)
                 else if (js[i] == ']' && !active_backslash) {
                     in_angular_brackets = false;
                 }
-                active_backslash = (js[i++] == '\\') * !active_backslash;
+                active_backslash = js[i++] == '\\' && !active_backslash;
             }
             if (js[i] != '/') {
                 m.error_position = regex_start_i;
-                asprintf(&m.result, "Unclosed regex starting in line %%d, column %%d\n");
+                asprintf(&m.result, "Unclosed regex starting in line %%zu, column %%zu\n");
                 goto error;
             }
             js_min[js_min_length++] = '/';
@@ -1212,13 +1212,13 @@ struct Minification minify_js(const char *js)
             continue;
         }
         if (js[i] == '`' || js[i] == '"' || js[i] == '\'' ||
-            js[i] == '}' && curly_blocks[curly_nesting_level].type == CURLY_BLOCK_STRING_INTERPOLATION)
+            js[i] == '}' && curly_blocks[curly_nesting_level - 1].type == CURLY_BLOCK_STRING_INTERPOLATION)
         {
             if (js[i] == '}') {
                 curly_nesting_level -= 1;
             }
             js_min[js_min_length++] = js[i];
-            int quote_i;
+            size_t quote_i;
         merge_strings:
             quote_i = i;
             i += 1;
@@ -1238,7 +1238,7 @@ struct Minification minify_js(const char *js)
                     }
                     else if (js[quote_i] != '`' && js[quote_i] != '}') {
                         m.error_position = i;
-                        asprintf(&m.result, "String contains unescaped line break in line %%d, column %%d\n");
+                        asprintf(&m.result, "String contains unescaped line break in line %%zu, column %%zu\n");
                         goto error;
                     }
                 }
@@ -1247,7 +1247,7 @@ struct Minification minify_js(const char *js)
                     js[i - 1] == '$' && js[i] == '{')
                 {
                     INCR_CURLY_NESTING_LEVEL;
-                    curly_blocks[curly_nesting_level].type = CURLY_BLOCK_STRING_INTERPOLATION;
+                    curly_blocks[curly_nesting_level - 1].type = CURLY_BLOCK_STRING_INTERPOLATION;
                     break;
                 }
                 if (i < quote_i + sizeof "</script" - 1 &&
@@ -1256,7 +1256,7 @@ struct Minification minify_js(const char *js)
                     strcpy(&js_min[js_min_length - sizeof "</script" + 1], "<\\/script");
                     js_min_length += 1;
                 }
-                active_backslash = (js[i++] == '\\') * !active_backslash;
+                active_backslash = js[i++] == '\\' && !active_backslash;
             }
             if (js[i] == '{') {
                 i += 1;
@@ -1268,11 +1268,11 @@ struct Minification minify_js(const char *js)
                 }
                 m.error_position = i - 1;
                 asprintf(&m.result,
-                    "Unexpected end of script, expected `%c` after line %%d, column %%d\n", js[quote_i]);
+                    "Unexpected end of script, expected `%c` after line %%zu, column %%zu\n", js[quote_i]);
                 goto error;
             }
             i += 1;
-            int k = i;
+            size_t k = i;
             bool skipped_all_comments = JS_SKIP_WHITESPACES_COMMENTS(js, &k, NULL, NULL);
             if (!skipped_all_comments || js[k] != '+') {
                 js_min[js_min_length++] = js[quote_i] == '}' ? '`' : js[quote_i];
@@ -1292,15 +1292,14 @@ struct Minification minify_js(const char *js)
             goto merge_strings;
         }
         else if (js[i] == '}') {
-            if (curly_blocks[curly_nesting_level].do_nesting_level != 0) {
+            if (curly_blocks[curly_nesting_level - 1].do_nesting_level != 0) {
                 m.error_position = i;
-                printf("%d\n", curly_blocks[curly_nesting_level].do_nesting_level);
-                asprintf(&m.result, "Unclosed `do` block before `}` in line %%d, %%d\n");
+                asprintf(&m.result, "Unclosed `do` block before `}` in line %%zu, column %%zu\n");
                 goto error;
             }
-            if (--curly_nesting_level < 0) {
+            if (curly_nesting_level-- == 1) {
                 m.error_position = i;
-                asprintf(&m.result, "Unexpected `}` in line %%d, column %%d\n");
+                asprintf(&m.result, "Unexpected `}` in line %%zu, column %%zu\n");
                 goto error;
             }
             js_min[js_min_length++] = '}';
@@ -1311,7 +1310,7 @@ struct Minification minify_js(const char *js)
             js[i] == '/' && js[i + 1] == '*' ||
             js[i] == '/' && js[i + 1] == '/')
         {
-            int whitespace_comment_i = i;
+            size_t whitespace_comment_i = i;
             JS_SKIP_WHITESPACES_COMMENTS(js, &i, js_min, &js_min_length);
             if (js_min_length == 0) {
                 continue;
@@ -1329,9 +1328,9 @@ struct Minification minify_js(const char *js)
             if (
                 js_min[js_min_length - 1] == ')' &&
                 (
-                    round_blocks[round_nesting_level + 1] == ROUND_BLOCK_PREFIXED_CONDITION ||
-                    round_blocks[round_nesting_level + 1] == ROUND_BLOCK_PARAM ||
-                    round_blocks[round_nesting_level + 1] == ROUND_BLOCK_PARAM_STANDALONE ||
+                    round_blocks[round_nesting_level] == ROUND_BLOCK_PREFIXED_CONDITION ||
+                    round_blocks[round_nesting_level] == ROUND_BLOCK_PARAM ||
+                    round_blocks[round_nesting_level] == ROUND_BLOCK_PARAM_STANDALONE ||
                     js[i] == '='
                 )
             ) {
@@ -1340,10 +1339,10 @@ struct Minification minify_js(const char *js)
             if (
                 js_min[js_min_length - 1] == '}' &&
                 (
-                    curly_blocks[curly_nesting_level + 1].type == CURLY_BLOCK_TRY_FINALLY ||
-                    curly_blocks[curly_nesting_level + 1].type == CURLY_BLOCK_CONDITION_BODY ||
-                    curly_blocks[curly_nesting_level + 1].type == CURLY_BLOCK_FUNC_BODY_STANDALONE ||
-                    curly_blocks[curly_nesting_level + 1].type == CURLY_BLOCK_STANDALONE
+                    curly_blocks[curly_nesting_level].type == CURLY_BLOCK_TRY_FINALLY ||
+                    curly_blocks[curly_nesting_level].type == CURLY_BLOCK_CONDITION_BODY ||
+                    curly_blocks[curly_nesting_level].type == CURLY_BLOCK_FUNC_BODY_STANDALONE ||
+                    curly_blocks[curly_nesting_level].type == CURLY_BLOCK_STANDALONE
                 )
             ) {
                 continue;
@@ -1406,14 +1405,14 @@ struct Minification minify_js(const char *js)
         js_min[js_min_length++] = js[i];
         i += 1;
     }
-    if (round_nesting_level != -1) {
+    if (round_nesting_level != 0) {
         m.error_position = last_open_round_bracket_i;
-        asprintf(&m.result, "Unclosed round bracket in line %%d, column %%d\n");
+        asprintf(&m.result, "Unclosed round bracket in line %%zu, column %%zu\n");
         goto error;
     }
-    if (curly_nesting_level != 0) {
+    if (curly_nesting_level != 1) {
         m.error_position = last_open_curly_bracket_i;
-        asprintf(&m.result, "Unclosed curly bracket in line %%d, column %%d\n");
+        asprintf(&m.result, "Unclosed curly bracket in line %%zu, column %%zu\n");
         goto error;
     }
     m.result = realloc(js_min, js_min_length + 1);
@@ -1432,15 +1431,12 @@ error:
     return m;
 }
 
-enum SGMLSubset {SGML_SUBSET_XML, SGML_SUBSET_HTML};
-
-static void sgml_correct_error_position(const char *encoded, const char *decoded, int *error_position,
-    enum SGMLSubset sgml_subset)
+static void xmlhtml_correct_error_position(const char *encoded, const char *decoded, size_t *error_position,
+    bool is_xml)
 {
-    int encoded_i = 0, decoded_i = 0;
+    size_t encoded_i = 0, decoded_i = 0;
     bool in_cdata = false;
-    int (*tagncmp)(const char *, const char *, size_t);
-    tagncmp = (sgml_subset == SGML_SUBSET_XML ? strncmp : strnicmp);
+    int (*tagncmp)(const char *, const char *, size_t) = (is_xml ? strncmp : strnicmp);
     while (true) {
         if (*error_position == decoded_i) {
             *error_position = encoded_i;
@@ -1450,9 +1446,7 @@ static void sgml_correct_error_position(const char *encoded, const char *decoded
             return;
         }
         if (!in_cdata) {
-            if (sgml_subset == SGML_SUBSET_XML &&
-                !tagncmp(&encoded[encoded_i], "<![CDATA[", sizeof "<![CDATA[" - 1))
-            {
+            if (is_xml && !tagncmp(&encoded[encoded_i], "<![CDATA[", sizeof "<![CDATA[" - 1)) {
                 in_cdata = true;
                 encoded_i += sizeof "<![CDATA[" - 1;
                 decoded_i += 1;
@@ -1483,7 +1477,7 @@ static void sgml_correct_error_position(const char *encoded, const char *decoded
                 decoded_i += 1;
                 continue;
             }
-            if (sgml_subset == SGML_SUBSET_HTML) {
+            if (!is_xml) {
                 if (!tagncmp(&encoded[encoded_i], "&plus;", sizeof "&plus;" - 1)) {
                     encoded_i += sizeof "&quot;" - 1;
                     decoded_i += 1;
@@ -1497,7 +1491,7 @@ static void sgml_correct_error_position(const char *encoded, const char *decoded
             }
             if (encoded[encoded_i] == '&' && encoded[encoded_i + 1] == '#') {
                 encoded_i += 2;
-                if (encoded[encoded_i] == 'x' || sgml_subset == SGML_SUBSET_HTML && encoded[encoded_i] == 'X') {
+                if (encoded[encoded_i] == 'x' || !is_xml && encoded[encoded_i] == 'X') {
                     encoded_i += 1;
                 }
                 while (encoded[encoded_i] != ';' && encoded[encoded_i] != '\0') {
@@ -1507,7 +1501,7 @@ static void sgml_correct_error_position(const char *encoded, const char *decoded
                 continue;
             }
         }
-        else if (sgml_subset == SGML_SUBSET_XML && !strncmp(&encoded[encoded_i], "]]>", sizeof "]]>" - 1)) {
+        else if (is_xml && !strncmp(&encoded[encoded_i], "]]>", sizeof "]]>" - 1)) {
             in_cdata = false;
             encoded_i += sizeof "]]>" - 1;
             decoded_i += sizeof "]]>" - 1;
@@ -1518,7 +1512,7 @@ static void sgml_correct_error_position(const char *encoded, const char *decoded
     }
 }
 
-static struct Minification sgml_decode(const char *input, int length, enum SGMLSubset sgml_subset)
+static struct Minification xmlhtml_decode(const char *input, size_t length, bool is_xml)
 {
     // This function helps minify inline scripts and styles in XML (e.g. SVG, MathML, XHTML)
     // documents. We need to decode XML entities and CDATA sections before feeding the tag content
@@ -1531,21 +1525,17 @@ static struct Minification sgml_decode(const char *input, int length, enum SGMLS
     // The implementation of HTML decoding has only limited capability here, just enough to handle possible
     // encoding of the script type attribute.
 
-    int i = 0;
-    int result_length = 0;
+    size_t i = 0;
+    size_t result_length = 0;
     bool in_cdata = false;
     struct Minification m = {0};
-    int (*tagncmp)(const char *, const char *, size_t);
-    tagncmp = (sgml_subset == SGML_SUBSET_XML ? strncmp : strnicmp);
     char *result = malloc(length + 1);
     if (result == NULL) {
         return m;
     }
     while (i < length) {
         if (!in_cdata) {
-            if (sgml_subset == SGML_SUBSET_XML &&
-                !strncmp(&input[i], "<![CDATA[", sizeof "<![CDATA[" - 1))
-            {
+            if (is_xml && !strncmp(&input[i], "<![CDATA[", sizeof "<![CDATA[" - 1)) {
                 in_cdata = true;
                 i += sizeof "<![CDATA[" - 1;
                 continue;
@@ -1575,7 +1565,7 @@ static struct Minification sgml_decode(const char *input, int length, enum SGMLS
                 i += sizeof "&quot;" - 1;
                 continue;
             }
-            if (sgml_subset == SGML_SUBSET_HTML) {
+            if (!is_xml) {
                 if (!strncmp(&input[i], "&plus;", sizeof "&plus;" - 1)) {
                     result[result_length++] = '+';
                     i += sizeof "&plus;" - 1;
@@ -1588,9 +1578,9 @@ static struct Minification sgml_decode(const char *input, int length, enum SGMLS
                 }
             }
             if (input[i] == '&' && input[i + 1] == '#') {
-                int codepoint = 0;
-                int k;
-                if (input[i + 2] == 'x' || sgml_subset == SGML_SUBSET_HTML && input[i + 2] == 'X') {
+                uint_fast32_t codepoint = 0;
+                size_t k;
+                if (input[i + 2] == 'x' || !is_xml && input[i + 2] == 'X') {
                     for (k = 3; input[i + k] != ';'; ++k) {
                         if (input[i + k] >= '0' && input[i + k] <= '9') {
                             codepoint = codepoint * 16 + (input[i + k] - '0');
@@ -1619,11 +1609,8 @@ static struct Minification sgml_decode(const char *input, int length, enum SGMLS
                     }
                 }
                 if (codepoint > 0x7FFFFFFF) {
-                    codepoint = -1;
-                }
-                if (codepoint == -1) {
                     m.error_position = i;
-                    asprintf(&m.result, "XML entity with invalid codepoint in line %%d, column %%d\n");
+                    asprintf(&m.result, "XML entity with invalid codepoint in line %%zu, column %%zu\n");
                     goto error;
                 }
 
@@ -1666,13 +1653,13 @@ static struct Minification sgml_decode(const char *input, int length, enum SGMLS
                 }
                 continue;
             }
-            if (sgml_subset == SGML_SUBSET_XML && input[i] == '&') {
+            if (is_xml && input[i] == '&') {
                 m.error_position = i;
-                asprintf(&m.result, "Invalid XML entity in line %%d, column %%d\n");
+                asprintf(&m.result, "Invalid XML entity in line %%zu, column %%zu\n");
                 goto error;
             }
         }
-        else if (sgml_subset == SGML_SUBSET_XML && !strncmp(&input[i], "]]>", sizeof "]]>" - 1)) {
+        else if (is_xml && !strncmp(&input[i], "]]>", sizeof "]]>" - 1)) {
             in_cdata = false;
             i += sizeof "]]>" - 1;
             continue;
@@ -1692,13 +1679,13 @@ error:
 static struct EncodedString
 {
     char *data;
-    int length;
+    size_t length;
 }
-xml_encode(const char *input, const int input_length)
+xml_encode(const char *input, const size_t input_length)
 {
-    int added_length_with_cdata = sizeof "<![CDATA[]]>" - 1;
-    int added_length_with_entities = 0;
-    int i = 0;
+    size_t added_length_with_cdata = sizeof "<![CDATA[]]>" - 1;
+    size_t added_length_with_entities = 0;
+    size_t i = 0;
     while (true) {
         if (input[i] == '\0') {
             break;
@@ -1786,15 +1773,15 @@ xml_encode(const char *input, const int input_length)
     }
 }
 
-static struct Minification minify_sgml(const char *sgml, enum SGMLSubset sgml_subset)
+static struct Minification minify_xmlhtml(const char *xmlhtml, bool is_xml)
 {
-    int input_strlen = strlen(sgml);
+    size_t input_strlen = strlen(xmlhtml);
     struct Minification m = {0};
-    char *sgml_min = malloc(input_strlen + 1);
-    if (sgml_min == NULL) {
+    char *xmlhtml_min = malloc(input_strlen + 1);
+    if (xmlhtml_min == NULL) {
         return m;
     }
-    int sgml_min_length = 0;
+    size_t xmlhtml_min_length = 0;
 
     enum {
         SYNTAX_BLOCK_TAG,
@@ -1808,21 +1795,19 @@ static struct Minification minify_sgml(const char *sgml, enum SGMLSubset sgml_su
         SCRIPT_TYPE_OTHER
     } script_type;
 
-    int i = 0;
+    size_t i = 0;
     const char *current_tag;
-    int current_tag_length = 0;
+    size_t current_tag_length = 0;
     bool is_closing_tag;
-    bool whitespace_before_tag;
-    int (*tagncmp)(const char *, const char *, size_t);
-    tagncmp = (sgml_subset == SGML_SUBSET_XML ? strncmp : strnicmp);
+    bool has_whitespace_before_tag;
+    int (*tagncmp)(const char *, const char *, size_t) = (is_xml ? strncmp : strnicmp);
     const char *value, *attribute;
-    int value_length, attribute_length;
+    size_t value_length, attribute_length;
 
     while (true) {
         // Beginning of inline minification
 
         const char *tag_content_delimiter = NULL;
-        int tag_content_delimiter_length;
         struct Minification (*tag_content_minify_callback)(const char *) = NULL;
 
         if (syntax_block == SYNTAX_BLOCK_CONTENT &&
@@ -1830,7 +1815,6 @@ static struct Minification minify_sgml(const char *sgml, enum SGMLSubset sgml_su
             !tagncmp(current_tag, "script", sizeof "script" - 1))
         {
             tag_content_delimiter = "</script";
-            tag_content_delimiter_length = sizeof "</script" - 1;
             if (script_type == SCRIPT_TYPE_JAVASCRIPT) {
                 tag_content_minify_callback = minify_js;
             }
@@ -1846,39 +1830,38 @@ static struct Minification minify_sgml(const char *sgml, enum SGMLSubset sgml_su
             !tagncmp(current_tag, "style", sizeof "style" - 1))
         {
             tag_content_delimiter = "</style";
-            tag_content_delimiter_length = sizeof "</style" - 1;
             tag_content_minify_callback = minify_css;
         }
         if (tag_content_delimiter != NULL) {
-            int content_start_i = i;
+            size_t content_start_i = i;
             bool in_cdata = false;
             while (true) {
-                if (sgml[i] == '\0') {
+                if (xmlhtml[i] == '\0') {
                     do {
                         i -= 1;
-                    } while (is_whitespace(sgml[i - 1]));
+                    } while (is_whitespace(xmlhtml[i - 1]));
                     m.error_position = i - 1;
                     asprintf(&m.result,
-                        "Unexpected end of document, expected `%s>` after line %%d, column %%d\n",
+                        "Unexpected end of document, expected `%s>` after line %%zu, column %%zu\n",
                         tag_content_delimiter);
                     goto error;
                 }
-                if (sgml_subset == SGML_SUBSET_XML &&
-                    !strncmp(&sgml[i], "<![CDATA[", sizeof "<![CDATA[" - 1))
+                if (is_xml &&
+                    !strncmp(&xmlhtml[i], "<![CDATA[", sizeof "<![CDATA[" - 1))
                 {
                     in_cdata = true;
                     i += sizeof "<![CDATA[" - 1;
                     continue;
                 }
-                if (sgml_subset == SGML_SUBSET_XML &&
-                    !strncmp(&sgml[i], "]]>", sizeof "]]>" - 1))
+                if (is_xml &&
+                    !strncmp(&xmlhtml[i], "]]>", sizeof "]]>" - 1))
                 {
                     in_cdata = false;
                     i += sizeof "]]>" - 1;
                     continue;
                 }
                 if (!in_cdata &&
-                    !tagncmp(&sgml[i], tag_content_delimiter, sizeof tag_content_delimiter - 1))
+                    !tagncmp(&xmlhtml[i], tag_content_delimiter, sizeof tag_content_delimiter - 1))
                 {
                     current_tag_length = 0;
                     break;
@@ -1886,12 +1869,12 @@ static struct Minification minify_sgml(const char *sgml, enum SGMLSubset sgml_su
                 i += 1;
             }
             if (tag_content_minify_callback == NULL) {
-                memcpy(&sgml_min[sgml_min_length], &sgml[content_start_i], i - content_start_i);
-                sgml_min_length += i - content_start_i;
+                memcpy(&xmlhtml_min[xmlhtml_min_length], &xmlhtml[content_start_i], i - content_start_i);
+                xmlhtml_min_length += i - content_start_i;
                 continue;
             }
-            if (sgml_subset == SGML_SUBSET_XML) {
-                m = sgml_decode(&sgml[content_start_i], i - content_start_i, SGML_SUBSET_XML);
+            if (is_xml) {
+                m = xmlhtml_decode(&xmlhtml[content_start_i], i - content_start_i, true);
                 if (m.result == NULL || m.result_is_error_message) {
                     m.error_position += content_start_i;
                     goto error;
@@ -1900,8 +1883,8 @@ static struct Minification minify_sgml(const char *sgml, enum SGMLSubset sgml_su
                 m = tag_content_minify_callback(m.result);
                 free(input_to_free);
                 if (m.result == NULL) {
-                    sgml_correct_error_position(&sgml[content_start_i], m.result, &m.error_position,
-                        sgml_subset);
+                    xmlhtml_correct_error_position(&xmlhtml[content_start_i], m.result, &m.error_position,
+                        is_xml);
                     m.error_position += content_start_i;
                     goto error;
                 }
@@ -1913,13 +1896,13 @@ static struct Minification minify_sgml(const char *sgml, enum SGMLSubset sgml_su
                 }
                 m.result = encoded.data;
                 if (encoded.length > i - content_start_i) {
-                    char *new_sgml_min = realloc(
-                        sgml_min, input_strlen + encoded.length - i + content_start_i
+                    char *xmlhtml_min_realloc = realloc(
+                        xmlhtml_min, input_strlen + encoded.length - i + content_start_i
                     );
-                    if (new_sgml_min == NULL) {
+                    if (xmlhtml_min_realloc == NULL) {
                         goto error;
                     }
-                    sgml_min = new_sgml_min;
+                    xmlhtml_min = xmlhtml_min_realloc;
                 }
             }
             else {
@@ -1927,7 +1910,7 @@ static struct Minification minify_sgml(const char *sgml, enum SGMLSubset sgml_su
                 if (tag_content == NULL) {
                     goto error;
                 }
-                memcpy(tag_content, &sgml[content_start_i], i - content_start_i);
+                memcpy(tag_content, &xmlhtml[content_start_i], i - content_start_i);
                 tag_content[i - content_start_i] = '\0';
                 m = tag_content_minify_callback(tag_content);
                 free(tag_content);
@@ -1936,144 +1919,144 @@ static struct Minification minify_sgml(const char *sgml, enum SGMLSubset sgml_su
                     goto error;
                 }
             }
-            int result_length = strlen(m.result);
-            memcpy(&sgml_min[sgml_min_length], m.result, result_length);
-            sgml_min_length += result_length;
+            size_t result_length = strlen(m.result);
+            memcpy(&xmlhtml_min[xmlhtml_min_length], m.result, result_length);
+            xmlhtml_min_length += result_length;
             free(m.result);
             continue;
         }
 
         // End of inline minification
 
-        if (sgml[i] == '\0') {
+        if (xmlhtml[i] == '\0') {
             if (syntax_block == SYNTAX_BLOCK_TAG) {
                 m.error_position = i;
-                asprintf(&m.result, "Unexpected end of document expected `>` after line %%d, column %%d\n");
+                asprintf(&m.result, "Unexpected end of document expected `>` after line %%zu, column %%zu\n");
                 goto error;
             }
-            sgml_min[sgml_min_length] = '\0';
+            xmlhtml_min[xmlhtml_min_length] = '\0';
             break;
         }
-        if (!strncmp(&sgml[i], "<!--", 4)) {
-            int comment_start_i = i;
+        if (!strncmp(&xmlhtml[i], "<!--", 4)) {
+            size_t comment_start_i = i;
             i += 4;
-            while (sgml[i] != '\0' && strncmp(&sgml[i], "-->", 3)) {
+            while (xmlhtml[i] != '\0' && strncmp(&xmlhtml[i], "-->", 3)) {
                 i += 1;
             }
-            if (sgml[i] == '\0') {
+            if (xmlhtml[i] == '\0') {
                 m.error_position = comment_start_i;
-                asprintf(&m.result, "Unclosed comment starting in line %%d, column %%d\n");
+                asprintf(&m.result, "Unclosed comment starting in line %%zu, column %%zu\n");
                 goto error;
             }
             i += 3;
 
             // Trim whitespace at the end of the document
 
-            int k = i;
-            while (is_whitespace(sgml[k])) {
+            size_t k = i;
+            while (is_whitespace(xmlhtml[k])) {
                 k += 1;
             }
-            if (sgml[k] == '\0') {
+            if (xmlhtml[k] == '\0') {
                 i = k;
             }
             continue;
         }
-        if (sgml_subset == SGML_SUBSET_XML && !strncmp(&sgml[i], "<![CDATA[", sizeof "<![CDATA[" - 1)) {
-            memcpy(&sgml_min[sgml_min_length], "<![CDATA[", sizeof "<![CDATA[" - 1);
-            sgml_min_length += sizeof "<![CDATA[" - 1;
+        if (is_xml && !strncmp(&xmlhtml[i], "<![CDATA[", sizeof "<![CDATA[" - 1)) {
+            memcpy(&xmlhtml_min[xmlhtml_min_length], "<![CDATA[", sizeof "<![CDATA[" - 1);
+            xmlhtml_min_length += sizeof "<![CDATA[" - 1;
             i += sizeof "<![CDATA[" - 1;
             while (true) {
-                if (!strncmp(&sgml[i], "]]>", sizeof "]]>" - 1)) {
-                    memcpy(&sgml_min[sgml_min_length], "]]>", sizeof "]]>" - 1);
-                    sgml_min_length += sizeof "]]>" - 1;
+                if (!strncmp(&xmlhtml[i], "]]>", sizeof "]]>" - 1)) {
+                    memcpy(&xmlhtml_min[xmlhtml_min_length], "]]>", sizeof "]]>" - 1);
+                    xmlhtml_min_length += sizeof "]]>" - 1;
                     i += sizeof "]]>" - 1;
                     break;
                 }
-                sgml_min[sgml_min_length++] = sgml[i];
+                xmlhtml_min[xmlhtml_min_length++] = xmlhtml[i];
                 i += 1;
             }
             continue;
         }
-        if (sgml[i] == '<') {
+        if (xmlhtml[i] == '<') {
             // Consume `<` and tag name
             if (syntax_block == SYNTAX_BLOCK_TAG) {
                 m.error_position = i;
-                asprintf(&m.result, "Illegal `<` in line %%d, column %%d\n");
+                asprintf(&m.result, "Illegal `<` in line %%zu, column %%zu\n");
                 goto error;
             }
-            whitespace_before_tag = sgml_min_length > 0 && is_whitespace(sgml_min[sgml_min_length - 1]);
-            sgml_min[sgml_min_length++] = '<';
+            has_whitespace_before_tag = xmlhtml_min_length > 0 && is_whitespace(xmlhtml_min[xmlhtml_min_length - 1]);
+            xmlhtml_min[xmlhtml_min_length++] = '<';
             i += 1;
-            if (!strnicmp(&sgml[i], "!DOCTYPE", sizeof "!DOCTYPE" - 1)) {
+            if (!strnicmp(&xmlhtml[i], "!DOCTYPE", sizeof "!DOCTYPE" - 1)) {
                 syntax_block = SYNTAX_BLOCK_DOCTYPE;
                 continue;
             }
 
-            current_tag = &sgml[i];
-            is_closing_tag = (sgml[i] == '/');
+            current_tag = &xmlhtml[i];
+            is_closing_tag = (xmlhtml[i] == '/');
             if (is_closing_tag) {
-                sgml_min[sgml_min_length++] = '/';
+                xmlhtml_min[xmlhtml_min_length++] = '/';
                 i += 1;
             }
             if (!(
-                sgml[i] >= 'a' && sgml[i] <= 'z' ||
-                sgml[i] >= 'A' && sgml[i] <= 'Z' ||
-                sgml[i] == ':' || sgml[i] == '_' ||
-                sgml[i] == '?'
+                xmlhtml[i] >= 'a' && xmlhtml[i] <= 'z' ||
+                xmlhtml[i] >= 'A' && xmlhtml[i] <= 'Z' ||
+                xmlhtml[i] == ':' || xmlhtml[i] == '_' ||
+                xmlhtml[i] == '?'
             )) {
                 m.error_position = i - 1;
                 asprintf(&m.result,
-                    "`%c` in line %%d, column %%d is followed by an illegal character\n", sgml[i - 1]);
+                    "`%c` in line %%zu, column %%zu is followed by an illegal character\n", xmlhtml[i - 1]);
                 goto error;
             }
-            sgml_min[sgml_min_length++] = sgml[i];
+            xmlhtml_min[xmlhtml_min_length++] = xmlhtml[i];
             current_tag_length = 1;
             while (
-                sgml[i + current_tag_length] >= 'a' && sgml[i + current_tag_length] <= 'z' ||
-                sgml[i + current_tag_length] >= 'A' && sgml[i + current_tag_length] <= 'Z' ||
-                sgml[i + current_tag_length] >= '0' && sgml[i + current_tag_length] <= '9' ||
-                sgml[i + current_tag_length] == '-'
+                xmlhtml[i + current_tag_length] >= 'a' && xmlhtml[i + current_tag_length] <= 'z' ||
+                xmlhtml[i + current_tag_length] >= 'A' && xmlhtml[i + current_tag_length] <= 'Z' ||
+                xmlhtml[i + current_tag_length] >= '0' && xmlhtml[i + current_tag_length] <= '9' ||
+                xmlhtml[i + current_tag_length] == '-'
             ) {
                 current_tag_length += 1;
-                sgml_min[sgml_min_length++] = sgml[i + current_tag_length - 1];
+                xmlhtml_min[xmlhtml_min_length++] = xmlhtml[i + current_tag_length - 1];
             }
             if (
-                sgml[i + current_tag_length] != '/' && sgml[i + current_tag_length] != '>' &&
-                !is_whitespace(sgml[i + current_tag_length])
+                xmlhtml[i + current_tag_length] != '/' && xmlhtml[i + current_tag_length] != '>' &&
+                !is_whitespace(xmlhtml[i + current_tag_length])
             ) {
                 m.error_position = i + current_tag_length;
-                asprintf(&m.result, "Illegal character in tag name in in line %%d, column %%d\n");
+                asprintf(&m.result, "Illegal character in tag name in in line %%zu, column %%zu\n");
                 goto error;
             }
             syntax_block = SYNTAX_BLOCK_TAG;
-            script_type == SCRIPT_TYPE_JAVASCRIPT;
+            script_type = SCRIPT_TYPE_JAVASCRIPT;
             attribute_length = 0;
             i += current_tag_length;
             continue;
         }
-        if (sgml[i] == '>') {
+        if (xmlhtml[i] == '>') {
             if (syntax_block == SYNTAX_BLOCK_CONTENT) {
                 m.error_position = i;
-                asprintf(&m.result, "Illegal `>` in line %%d, column %%d\n");
+                asprintf(&m.result, "Illegal `>` in line %%zu, column %%zu\n");
                 goto error;
             }
-            if (sgml[i - 1] == '/' && sgml_min[sgml_min_length - 1] != '=') {
+            if (xmlhtml[i - 1] == '/' && xmlhtml_min[xmlhtml_min_length - 1] != '=') {
                 is_closing_tag = true;
             }
 
-            // Transform `<sgml></sgml>` to `<sgml/>`. This would be illegal for HTML.
+            // Transform `<xmlhtml></xmlhtml>` to `<xmlhtml/>`. This would be illegal for HTML.
 
-            else if (sgml_subset == SGML_SUBSET_XML &&
+            else if (is_xml &&
                      syntax_block != SYNTAX_BLOCK_DOCTYPE &&
-                     sgml[i + 1] == '<' && sgml[i + 2] == '/' &&
-                     !strncmp(current_tag, &sgml[i + 3], current_tag_length) &&
-                     (is_whitespace(sgml[i + 3 + current_tag_length]) ||
-                     sgml[i + 3 + current_tag_length] == '>'))
+                     xmlhtml[i + 1] == '<' && xmlhtml[i + 2] == '/' &&
+                     !strncmp(current_tag, &xmlhtml[i + 3], current_tag_length) &&
+                     (is_whitespace(xmlhtml[i + 3 + current_tag_length]) ||
+                     xmlhtml[i + 3 + current_tag_length] == '>'))
             {
-                sgml_min[sgml_min_length++] = '/';
-                sgml_min[sgml_min_length++] = '>';
+                xmlhtml_min[xmlhtml_min_length++] = '/';
+                xmlhtml_min[xmlhtml_min_length++] = '>';
                 i += 3 + current_tag_length;
-                while (sgml[i] != '>' && sgml[i] != '\0') {
+                while (xmlhtml[i] != '>' && xmlhtml[i] != '\0') {
                     i += 1;
                 }
                 syntax_block = SYNTAX_BLOCK_CONTENT;
@@ -2085,121 +2068,121 @@ static struct Minification minify_sgml(const char *sgml, enum SGMLSubset sgml_su
             i += 1;
             syntax_block = SYNTAX_BLOCK_CONTENT;
 
-            if (sgml_subset == SGML_SUBSET_XML) {
+            if (is_xml) {
                 // Ignore whitespace except between opening and closing tags
 
-                int k = i;
-                while (is_whitespace(sgml[k])) {
+                size_t k = i;
+                while (is_whitespace(xmlhtml[k])) {
                     k += 1;
                 }
-                if (sgml[k] == '<' && (is_closing_tag || sgml[k + 1] != '/')) {
+                if (xmlhtml[k] == '<' && (is_closing_tag || xmlhtml[k + 1] != '/')) {
                     i = k;
                 }
             }
 
-            sgml_min[sgml_min_length++] = '>';
+            xmlhtml_min[xmlhtml_min_length++] = '>';
 
             // Trim whitespace at the end of the document
 
-            int k = i;
-            while (is_whitespace(sgml[k])) {
+            size_t k = i;
+            while (is_whitespace(xmlhtml[k])) {
                 k += 1;
             }
-            if (sgml[k] == '\0') {
+            if (xmlhtml[k] == '\0') {
                 i = k;
             }
             continue;
         }
-        if (syntax_block == SYNTAX_BLOCK_TAG && is_whitespace(sgml[i])) {
-            while (is_whitespace(sgml[i])) {
+        if (syntax_block == SYNTAX_BLOCK_TAG && is_whitespace(xmlhtml[i])) {
+            while (is_whitespace(xmlhtml[i])) {
                 i += 1;
             }
-            if (sgml[i] != '=' && sgml_min[sgml_min_length - 1] != '=' && sgml[i] != '>' && sgml[i] != '/') {
-                sgml_min[sgml_min_length++] = ' ';
+            if (xmlhtml[i] != '=' && xmlhtml_min[xmlhtml_min_length - 1] != '=' && xmlhtml[i] != '>' && xmlhtml[i] != '/') {
+                xmlhtml_min[xmlhtml_min_length++] = ' ';
             }
-            if (is_closing_tag && sgml[i] != '>') {
+            if (is_closing_tag && xmlhtml[i] != '>') {
                 m.error_position = i;
-                asprintf(&m.result, "Illegal content in line %%d, column %%d after whitespace in closing tag\n");
+                asprintf(&m.result, "Illegal content in line %%zu, column %%zu after whitespace in closing tag\n");
                 goto error;
             }
             continue;
         }
-        if (syntax_block == SYNTAX_BLOCK_TAG && sgml[i] != '=') {
+        if (syntax_block == SYNTAX_BLOCK_TAG && xmlhtml[i] != '=') {
             // Consume attribute
-            if (sgml[i] == '"' || sgml[i] == '\'') {
+            if (xmlhtml[i] == '"' || xmlhtml[i] == '\'') {
                 m.error_position = i;
-                asprintf(&m.result, "Illegal character `%c` in line %%d, column %%d\n", sgml[i]);
+                asprintf(&m.result, "Illegal character `%c` in line %%zu, column %%zu\n", xmlhtml[i]);
                 goto error;
             }
-            attribute = &sgml[i];
+            attribute = &xmlhtml[i];
             attribute_length = 0;
-            while (strchr("\"' \t\r\n<>=/", sgml[i]) == NULL) {
-                sgml_min[sgml_min_length++] = sgml[i];
+            while (strchr("\"' \t\r\n<>=/", xmlhtml[i]) == NULL) {
+                xmlhtml_min[xmlhtml_min_length++] = xmlhtml[i];
                 attribute_length += 1;
                 i += 1;
             }
-            if (sgml[i] == '/' && sgml[i + 1] != '>') {
+            if (xmlhtml[i] == '/' && xmlhtml[i + 1] != '>') {
                 m.error_position = i;
-                asprintf(&m.result, "`/` in line %%d, column %%d is not followed by `>` \n");
+                asprintf(&m.result, "`/` in line %%zu, column %%zu is not followed by `>` \n");
                 goto error;
             }
-            if (sgml[i] == '/' &&sgml[i + 1] == '>') {
-                if (sgml_subset == SGML_SUBSET_XML) {
-                    sgml_min[sgml_min_length++] = '/';
+            if (xmlhtml[i] == '/' &&xmlhtml[i + 1] == '>') {
+                if (is_xml) {
+                    xmlhtml_min[xmlhtml_min_length++] = '/';
                 }
                 i += 1;
                 continue;
             }
-            if (strchr("=> \r\t\n/", sgml[i]) == NULL) {
+            if (strchr("=> \r\t\n/", xmlhtml[i]) == NULL) {
                 m.error_position = i;
-                asprintf(&m.result, "Illegal character `%c` after attribute in line %%d, column %%d\n",
-                    sgml[i]);
+                asprintf(&m.result, "Illegal character `%c` after attribute in line %%zu, column %%zu\n",
+                    xmlhtml[i]);
                 goto error;
             }
             continue;
         }
-        if (syntax_block == SYNTAX_BLOCK_TAG && sgml[i] == '=') {
+        if (syntax_block == SYNTAX_BLOCK_TAG && xmlhtml[i] == '=') {
             // Consume `=` followed by quoted or unquoted value
             if (attribute_length == 0) {
                 m.error_position = i;
-                asprintf(&m.result, "No attribute before `=` in line %%d, column %%d\n");
+                asprintf(&m.result, "No attribute before `=` in line %%zu, column %%zu\n");
                 goto error;
             }
 
             i += 1;
-            while (is_whitespace(sgml[i])) {
+            while (is_whitespace(xmlhtml[i])) {
                 i += 1;
             }
-            if (sgml[i] == '=' || sgml[i] == '>') {
+            if (xmlhtml[i] == '=' || xmlhtml[i] == '>') {
                 m.error_position = i;
-                asprintf(&m.result, "No value after `=` in line %%d, column %%d\n");
+                asprintf(&m.result, "No value after `=` in line %%zu, column %%zu\n");
                 goto error;
             }
-            if (sgml_subset == SGML_SUBSET_XML && sgml[i] != '"' && sgml[i] != '\'') {
+            if (is_xml && xmlhtml[i] != '"' && xmlhtml[i] != '\'') {
                 m.error_position = i;
-                asprintf(&m.result, "XML requires a quote after `=` in line %%d, column %%d\n");
+                asprintf(&m.result, "XML requires a quote after `=` in line %%zu, column %%zu\n");
                 goto error;
             }
 
-            sgml_min[sgml_min_length++] = '=';
-            if (sgml[i] == '"' || sgml[i] == '\'') {
-                char quote = sgml[i];
-                int string_start_i = i;
+            xmlhtml_min[xmlhtml_min_length++] = '=';
+            if (xmlhtml[i] == '"' || xmlhtml[i] == '\'') {
+                char quote = xmlhtml[i];
+                size_t string_start_i = i;
                 i += 1;
-                value = &sgml[i];
+                value = &xmlhtml[i];
                 value_length = 0;
                 bool need_quotes;
-                if (sgml_subset == SGML_SUBSET_XML || syntax_block == SYNTAX_BLOCK_DOCTYPE) {
+                if (is_xml || syntax_block == SYNTAX_BLOCK_DOCTYPE) {
                     need_quotes = true;
                 }
-                else if (sgml[i] == quote) {
+                else if (xmlhtml[i] == quote) {
                     need_quotes = true;
                 }
                 else {
                     need_quotes = false;
-                    int k = i;
-                    while (sgml[k] != quote) {
-                        if (strchr(" \r\t\n=\"'/", sgml[k]) != NULL) {
+                    size_t k = i;
+                    while (xmlhtml[k] != quote) {
+                        if (strchr(" \r\t\n=\"'/", xmlhtml[k]) != NULL) {
                             need_quotes = true;
                             break;
                         }
@@ -2207,37 +2190,37 @@ static struct Minification minify_sgml(const char *sgml, enum SGMLSubset sgml_su
                     }
                 }
                 if (need_quotes) {
-                    sgml_min[sgml_min_length++] = quote;
+                    xmlhtml_min[xmlhtml_min_length++] = quote;
                 }
-                while (sgml[i] != '\0' && sgml[i] != quote) {
-                    sgml_min[sgml_min_length++] = sgml[i];
+                while (xmlhtml[i] != '\0' && xmlhtml[i] != quote) {
+                    xmlhtml_min[xmlhtml_min_length++] = xmlhtml[i];
                     value_length += 1;
                     i += 1;
                 }
-                if (sgml[i] == '\0') {
+                if (xmlhtml[i] == '\0') {
                     m.error_position = string_start_i;
-                    asprintf(&m.result, "Unclosed string starting in line %%d, column %%d\n");
+                    asprintf(&m.result, "Unclosed string starting in line %%zu, column %%zu\n");
                     goto error;
                 }
                 i += 1;
                 if (
-                    !is_whitespace(sgml[i]) && sgml[i] != '>' &&
-                    (sgml[i] != '/' || sgml[i + 1] != '>') &&
-                    (sgml[i] != '?' || sgml[i + 1] != '>')
+                    !is_whitespace(xmlhtml[i]) && xmlhtml[i] != '>' &&
+                    (xmlhtml[i] != '/' || xmlhtml[i + 1] != '>') &&
+                    (xmlhtml[i] != '?' || xmlhtml[i + 1] != '>')
                 ) {
                     m.error_position = i;
-                    asprintf(&m.result, "Illegal character after `%c` in line %%d, column %%d\n", quote);
+                    asprintf(&m.result, "Illegal character after `%c` in line %%zu, column %%zu\n", quote);
                     goto error;
                 }
                 if (need_quotes) {
-                    sgml_min[sgml_min_length++] = quote;
+                    xmlhtml_min[xmlhtml_min_length++] = quote;
                 }
             }
             else {
-                value = &sgml[i];
+                value = &xmlhtml[i];
                 value_length = 0;
-                while (strchr(" \r\t\n >=\"'", sgml[i]) == NULL) {
-                    sgml_min[sgml_min_length++] = sgml[i];
+                while (strchr(" \r\t\n >=\"'", xmlhtml[i]) == NULL) {
+                    xmlhtml_min[xmlhtml_min_length++] = xmlhtml[i];
                     i += 1;
                     value_length += 1;
                 }
@@ -2245,7 +2228,7 @@ static struct Minification minify_sgml(const char *sgml, enum SGMLSubset sgml_su
 
             // Checking script type
 
-            struct Minification decoded_value = sgml_decode(value, value_length, SGML_SUBSET_HTML);
+            struct Minification decoded_value = xmlhtml_decode(value, value_length, false);
             if (decoded_value.result == NULL) {
                 m.error_position = i + decoded_value.error_position;
                 m.result = decoded_value.result;
@@ -2274,62 +2257,65 @@ static struct Minification minify_sgml(const char *sgml, enum SGMLSubset sgml_su
             free(decoded_value.result);
             continue;
         }
-        if (sgml_subset == SGML_SUBSET_HTML &&
-            syntax_block == SYNTAX_BLOCK_CONTENT && is_whitespace(sgml[i]))
-        {
+        if (!is_xml && syntax_block == SYNTAX_BLOCK_CONTENT && is_whitespace(xmlhtml[i])) {
             if (current_tag_length == sizeof "pre" - 1 &&
                 !strnicmp(current_tag, "pre", sizeof "pre" - 1))
             {
-                sgml_min[sgml_min_length++] = sgml[i];
+                xmlhtml_min[xmlhtml_min_length++] = xmlhtml[i];
                 i += 1;
                 continue;
             }
-            while (is_whitespace(sgml[i])) {
+            while (is_whitespace(xmlhtml[i])) {
                 i += 1;
             }
-            if (whitespace_before_tag && sgml_min[sgml_min_length - 1] == '>') {
+            if (has_whitespace_before_tag && xmlhtml_min[xmlhtml_min_length - 1] == '>') {
                 continue;
             }
-            sgml_min[sgml_min_length++] = ' ';
+            xmlhtml_min[xmlhtml_min_length++] = ' ';
             continue;
         }
-        sgml_min[sgml_min_length++] = sgml[i];
+        xmlhtml_min[xmlhtml_min_length++] = xmlhtml[i];
         i += 1;
     }
-    m.result = realloc(sgml_min, sgml_min_length + 1);
+    m.result = realloc(xmlhtml_min, xmlhtml_min_length + 1);
     if (m.result == NULL) {
         goto error;
     }
     return m;
 
 error:
-    free(sgml_min);
+    free(xmlhtml_min);
     m.result_is_error_message = (m.result != NULL);
     return m;
 }
 
 struct Minification minify_xml(const char *xml)
 {
-    return minify_sgml(xml, SGML_SUBSET_XML);
+    return minify_xmlhtml(xml, true);
 }
 
 struct Minification minify_html(const char *html)
 {
-    return minify_sgml(html, SGML_SUBSET_HTML);
+    return minify_xmlhtml(html, false);
 }
 
 struct LineColumn
 {
-    int line;
-    int column;
+    size_t line;
+    size_t column;
 };
 
-static struct LineColumn position_to_line_column(const char *text, int position)
+struct LineColumn position_to_line_column(const char *text, size_t position)
 {
     struct LineColumn lc = {.line = 1, .column = 0};
-    for (int i = 0; i <= position; ++i) {
-        lc.line += (text[i] == '\n');
-        lc.column = (text[i] != '\n') * (lc.column + 1);
+    for (size_t i = 0; i <= position; ++i) {
+        if (text[i] == '\n') {
+            lc.line += 1;
+            lc.column = 0;
+        }
+        else {
+            lc.column += 1;
+        }
     }
     return lc;
 }
@@ -2422,10 +2408,10 @@ int main(int argc, const char *argv[])
         return EXIT_FAILURE;
     }
     if (benchmark) {
-        int strlen_input = strlen(input);
-        int strlen_minification = strlen(m.result);
+        size_t strlen_input = strlen(input);
+        size_t strlen_minification = strlen(m.result);
         printf(
-            "Reduced the size by %.1f%% from %d to %d bytes\n",
+            "Reduced the size by %.1f%% from %zu to %zu bytes\n",
             100.0 - 100.0 * strlen_minification / strlen_input, strlen_input, strlen_minification
         );
     }
