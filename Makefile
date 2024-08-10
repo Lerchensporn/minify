@@ -1,6 +1,8 @@
 COMPILER ?= cc
 ifndef CROSS_TRIPLE
 	OUTPUT := minify
+else ifeq '$(CROSS_TRIPLE)' 'x86_64-w64-mingw32'
+	OUTPUT := minify_$(CROSS_TRIPLE).exe
 else
 	OUTPUT := minify_$(CROSS_TRIPLE)
 endif
@@ -12,13 +14,6 @@ build/$(OUTPUT): minify.c
 	mkdir -p build
 	$(COMPILER) -O2 -Wall -Wno-parentheses -Wno-maybe-uninitialized -o build/$(OUTPUT) minify.c
 	strip build/$(OUTPUT)
-
-.PHONY: debug
-debug: build/minify_debug
-
-build/minify_debug: minify.c
-	mkdir -p build
-	cc --debug -o $(build)/minify minify.c
 
 .PHONY: test
 test: release check
@@ -39,7 +34,7 @@ clean:
 .PHONY: crossbuild
 crossbuild:
 	docker run -e CROSS_TRIPLE=x86_64-w64-mingw32 \
-		-v $$(pwd):/workdir -u $$(id -u):$$(id -g) multiarch/crossbuild make
+		-v $$(pwd):/workdir -u $$(id -u):$$(id -g) multiarch/crossbuild make && \
 	docker run -e CROSS_TRIPLE=x86_64-apple-darwin \
 		-v $$(pwd):/workdir -u $$(id -u):$$(id -g) multiarch/crossbuild make
 	docker run -e CROSS_TRIPLE=x86_64-linux-gnu \
