@@ -1,0 +1,22 @@
+{
+  "os": "linux",
+  "cpu": [
+    "x64"
+  ],
+  "name": "@cminify/cminify-linux-x64",
+  "version": "3.0.1",
+  "description": "Fast minifier written in C",
+  "keywords": [
+    "minification",
+    "minify",
+    "minifier"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://codeberg.org/Jumping-Beaver/cminify"
+  },
+  "license": "ISC",
+  "bin": {
+    "cminify": "cminify"
+  }
+}

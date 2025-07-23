@@ -2372,7 +2372,9 @@ int main(int argc, const char *argv[])
     }
 
     if (print_usage) {
-        fputs("Usage: minify <css|js|xml|html|json> <input file|-> [--benchmark]\n", stderr);
+        fputs("Usage: ", stderr);
+        fputs(argv[0], stderr);
+        fputs(" <css|js|xml|html|json> <input file|-> [--benchmark]\n", stderr);
         return EXIT_FAILURE;
     }
 

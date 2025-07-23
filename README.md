@@ -1,4 +1,4 @@
-# Lerchensporn/minify
+# cminify
 
 This is a minifier for CSS, JavaScript, XML, HTML and JSON, written in C. It can also minify inline
 scripts, stylesheets and JSON data inside XML and HTML markup. JSON input is validated completely;

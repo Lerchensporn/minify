@@ -1,22 +1,22 @@
 COMPILER ?= cc
 ifndef CROSS_TRIPLE
-	OUTPUT := minify
+	OUTPUT := cminify
 else ifeq '$(CROSS_TRIPLE)' 'x86_64-w64-mingw32'
-	OUTPUT := minify_$(CROSS_TRIPLE).exe
+	OUTPUT := cminify_$(CROSS_TRIPLE).exe
 else
-	OUTPUT := minify_$(CROSS_TRIPLE)
+	OUTPUT := cminify_$(CROSS_TRIPLE)
 endif
 
 .PHONY: build
 build: build/$(OUTPUT)
 
-build/$(OUTPUT): minify.c
+build/$(OUTPUT): cminify.c
 	mkdir -p build
-	$(COMPILER) -O2 -Wall -Wno-parentheses -Wno-maybe-uninitialized -o build/$(OUTPUT) minify.c
+	$(COMPILER) -O2 -Wall -Wno-parentheses -Wno-maybe-uninitialized -o build/$(OUTPUT) cminify.c
 	strip build/$(OUTPUT)
 
 .PHONY: test
-test: release check
+test: build
 	./test-xml.sh
 	./test-css.sh
 	./test-html.sh
@@ -25,7 +25,7 @@ test: release check
 
 .PHONY: check
 check:
-	cppcheck --enable=all --suppress=missingIncludeSystem --check-level=exhaustive minify.c
+	cppcheck --enable=all --suppress=missingIncludeSystem --check-level=exhaustive cminify.c
 
 .PHONY: clean
 clean:
