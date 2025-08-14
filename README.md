@@ -5,7 +5,11 @@ scripts, stylesheets and JSON data inside XML and HTML markup. JSON input is val
 for the other formats, many but not all classes of syntax errors are caught. Precise errors
 messages are printed when invalid input is recognized.
 
-It is designed according to the following requirements:
+This project is mirrored on [GitHub](https://github.com/Jumping-Beaver/cminify).
+
+The maintainer can be contacted via the ticket systems or by e-mail at `jumping-beaver@mailbox.org`.
+
+## Design objectives
 
 - Released as single binary with no dependencies except `libc`.
 
@@ -55,7 +59,7 @@ It is designed according to the following requirements:
   inspection or adjustment. In a Makefile one can run this minifier on the
   result to create the release.
 
-# Alternatives
+## Alternatives
 
 Some alternative minifiers choose different objectives.
 
@@ -87,14 +91,14 @@ Some alternative minifiers choose different objectives.
    that is good to be alerted about. Strict parsing is a good practice to
    promote standard conformity.
 
-## Alternative multi-format minifier
+### Alternative multi-format minifier
 
 https://github.com/tdewolff/minify
 
 Written in Go. Minifies HTML, XML, SVG, JS, CSS, JSON. It is in the package
 repository of Alpine Linux and statically linked binary releases exist.
 
-## Alternative CSS minifiers
+### Alternative CSS minifiers
 
 https://github.com/csstidy-c/csstidy
 
@@ -131,7 +135,7 @@ http://opensource.perlig.de/rcssmin/
 
 Written in Python. Based on regex.
 
-## Alternative JavaScript minifiers
+### Alternative JavaScript minifiers
 
 https://terser.org/
 
@@ -147,7 +151,7 @@ Shipped as a 91 MB big single executable.
 
 https://esbuild.github.io/
 
-## SVG optimizers
+### SVG optimizers
 
 https://github.com/RazrFalcon/svgcleaner
 
@@ -161,7 +165,7 @@ https://github.com/scour-project/scour
 
 Written in Python.
 
-## Alternative HTML and XML minifiers
+### Alternative HTML and XML minifiers
 
 Here we have two very good options with no big dependencies. I still included
 XML and HTML minification in this minifier to cover all needs with one tool.
